@@ -136,24 +136,7 @@ describe('header edge cases', () => {
     const errors = validateRequiredMappings(missing)
     expect(errors.some((e) => /Voucher No/i.test(e))).toBe(true)
 
-    const withAlt = {
-      ...missing,
-      accountNo: {
-        columnIndex: 1,
-        confidence: 'high' as const,
-        candidates: [],
-        needsAuditorChoice: false,
-      },
-      description: {
-        columnIndex: 1,
-        confidence: 'high' as const,
-        candidates: [],
-        needsAuditorChoice: false,
-      },
-    }
-    // remap properly
     const ok = suggestMappings(['Date', 'Account No', 'Description', 'Debit', 'Credit'])
-    expect(validateRequiredMappings(ok).every((e) => !/Voucher No/i.test(e) || ok.accountNo.columnIndex != null || ok.voucherNo.columnIndex != null)).toBe(true)
     expect(validateRequiredMappings(ok)).toHaveLength(0)
   })
 
@@ -221,17 +204,17 @@ describe('Path A and Path B', () => {
   })
 
   it('Path B cliff example 510,000', () => {
-    const txs: LedgerTransaction[] = Array.from({ length: 30 }, (_, i) => ({
-      id: `R${i}`,
+    const pop: LedgerTransaction[] = Array.from({ length: 51 }, (_, i) => ({
+      id: `P${i}`,
       rowIndex: i,
       date: '2024-01-01',
       voucherNo: `V${i}`,
       accountNo: '',
       description: 'x',
-      debit: i === 0 ? 510_000 : 0,
+      debit: 10_000,
       credit: 0,
       amountRaw: 0,
-      coverageAmount: i === 0 ? 510_000 : 1_000,
+      coverageAmount: 10_000,
       bothSidesWarning: false,
       needsCoverageResolution: false,
       isRepeatedHeader: false,
@@ -240,24 +223,7 @@ describe('Path A and Path B', () => {
       exclusionReason: '',
       extras: {},
     }))
-    // Fix coverage: first 510k rest 0 for clarity — rebuild
-    const cliff: LedgerTransaction[] = [
-      { ...txs[0], coverageAmount: 510_000 },
-      ...Array.from({ length: 20 }, (_, i) => ({
-        ...txs[0],
-        id: `X${i}`,
-        coverageAmount: 0,
-        debit: 0,
-      })),
-    ]
-    // Better: 510k total with small items
-    const pop: LedgerTransaction[] = Array.from({ length: 51 }, (_, i) => ({
-      ...txs[0],
-      id: `P${i}`,
-      coverageAmount: 10_000,
-      debit: 10_000,
-    }))
-    // 51 * 10k = 510k
+    // 51 * 10k = 510k → tier 2 floor forces Rs. 500,000
     const r = pathBSizing(pop)
     expect(r.requiredCoverageValue).toBe(500_000)
   })

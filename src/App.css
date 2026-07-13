@@ -206,6 +206,16 @@ textarea {
   margin-top: 14px;
 }
 
+.preview-table-all {
+  max-height: min(60vh, 560px);
+}
+
+.preview-table-all thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

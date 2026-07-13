@@ -606,7 +606,10 @@ export default function App() {
                 <strong>{formatMoney(coverageTotal)}</strong>
               </div>
             </div>
-            <div className="preview-table-wrap">
+            <p className="lead-inline">
+              Review all {transactions.length} transactions below before confirming.
+            </p>
+            <div className="preview-table-wrap preview-table-all">
               <table>
                 <thead>
                   <tr>
@@ -619,7 +622,7 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {transactions.slice(0, 8).map((t) => (
+                  {transactions.map((t) => (
                     <tr key={t.id}>
                       <td>{t.id}</td>
                       <td>{t.date || '—'}</td>
@@ -632,9 +635,6 @@ export default function App() {
                 </tbody>
               </table>
             </div>
-            {transactions.length > 8 && (
-              <p className="hint">Showing first 8 of {transactions.length} transactions.</p>
-            )}
             <div className="actions">
               <button type="button" className="ghost" onClick={goBack}>
                 Back

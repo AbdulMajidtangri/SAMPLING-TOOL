@@ -12,6 +12,7 @@ export type WizardStep =
 export type StandardField =
   | 'date'
   | 'voucherNo'
+  | 'accountNo'
   | 'description'
   | 'debit'
   | 'credit'
@@ -47,6 +48,7 @@ export interface LedgerTransaction {
   rowIndex: number
   date: string
   voucherNo: string
+  accountNo: string
   description: string
   debit: number
   credit: number
@@ -107,6 +109,7 @@ export interface EvaluationState {
 export const STANDARD_FIELD_LABELS: Record<StandardField, string> = {
   date: 'Date (optional)',
   voucherNo: 'Voucher No (optional)',
+  accountNo: 'Account No (optional)',
   description: 'Description (optional)',
   debit: 'Debit (optional)',
   credit: 'Credit (optional)',
@@ -116,6 +119,7 @@ export const STANDARD_FIELD_LABELS: Record<StandardField, string> = {
 export const OPTIONAL_FIELDS: StandardField[] = [
   'date',
   'voucherNo',
+  'accountNo',
   'description',
   'debit',
   'credit',

@@ -76,6 +76,7 @@ export function buildTransactions(params: {
     const row = rows[rowIndex] ?? []
     const date = readOptionalText(row, mapping.date)
     const voucherNo = readOptionalText(row, mapping.voucherNo)
+    const accountNo = readOptionalText(row, mapping.accountNo)
     const description = readOptionalText(row, mapping.description)
 
     const debitResult = readOptionalAmount(row, mapping.debit)
@@ -94,6 +95,7 @@ export function buildTransactions(params: {
     const anyMappedContent =
       date ||
       voucherNo ||
+      accountNo ||
       description ||
       debitRaw !== 0 ||
       creditRaw !== 0 ||
@@ -106,6 +108,7 @@ export function buildTransactions(params: {
     const hasUsefulValue =
       date ||
       voucherNo ||
+      accountNo ||
       description ||
       debitRaw !== 0 ||
       creditRaw !== 0 ||
@@ -132,7 +135,10 @@ export function buildTransactions(params: {
 
     if (
       (date && normalizeLoose(date) === 'date') ||
-      (voucherNo && normalizeLoose(voucherNo) === 'voucherno')
+      (voucherNo && normalizeLoose(voucherNo) === 'voucherno') ||
+      (accountNo &&
+        (normalizeLoose(accountNo) === 'accountno' ||
+          normalizeLoose(accountNo) === 'accountnumber'))
     ) {
       warnings.push(`Row ${rowIndex + 1} may be a repeated header.`)
       continue
@@ -176,6 +182,7 @@ export function buildTransactions(params: {
       rowIndex,
       date,
       voucherNo,
+      accountNo,
       description,
       debit: debitRaw,
       credit: creditRaw,

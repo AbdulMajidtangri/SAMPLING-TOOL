@@ -77,6 +77,7 @@ export default function App() {
   >({
     date: { columnIndex: null, confidence: 'none' },
     voucherNo: { columnIndex: null, confidence: 'none' },
+    accountNo: { columnIndex: null, confidence: 'none' },
     description: { columnIndex: null, confidence: 'none' },
     debit: { columnIndex: null, confidence: 'none' },
     credit: { columnIndex: null, confidence: 'none' },
@@ -215,6 +216,7 @@ export default function App() {
     const mapIndexes = {
       date: mapping.date.columnIndex,
       voucherNo: mapping.voucherNo.columnIndex,
+      accountNo: mapping.accountNo.columnIndex,
       description: mapping.description.columnIndex,
       debit: mapping.debit.columnIndex,
       credit: mapping.credit.columnIndex,
@@ -590,6 +592,7 @@ export default function App() {
                   <tr>
                     <th>ID</th>
                     <th>Date</th>
+                    <th>Account</th>
                     <th>Voucher</th>
                     <th>Description</th>
                     <th>Coverage</th>
@@ -600,6 +603,7 @@ export default function App() {
                     <tr key={t.id}>
                       <td>{t.id}</td>
                       <td>{t.date || '—'}</td>
+                      <td>{t.accountNo || '—'}</td>
                       <td>{t.voucherNo || '—'}</td>
                       <td>{t.description || '—'}</td>
                       <td>{formatMoney(t.coverageAmount)}</td>
@@ -806,7 +810,8 @@ export default function App() {
                         onChange={() => toggleHaphazard(t.id)}
                       />
                       <span>
-                        {t.id} · {t.voucherNo || 'No voucher'} · {formatMoney(t.coverageAmount)}
+                        {t.id} · {t.accountNo || t.voucherNo || 'No ref'} ·{' '}
+                        {formatMoney(t.coverageAmount)}
                       </span>
                     </label>
                   ))}
@@ -851,6 +856,7 @@ export default function App() {
                 <thead>
                   <tr>
                     <th>ID</th>
+                    <th>Account</th>
                     <th>Voucher</th>
                     <th>Coverage</th>
                     <th>Exception?</th>
@@ -865,6 +871,7 @@ export default function App() {
                     return (
                       <tr key={item.id}>
                         <td>{item.id}</td>
+                        <td>{item.accountNo || '—'}</td>
                         <td>{item.voucherNo || '—'}</td>
                         <td>{formatMoney(item.coverageAmount)}</td>
                         <td>
@@ -1053,6 +1060,7 @@ export default function App() {
                   <tr>
                     <th>ID</th>
                     <th>Date</th>
+                    <th>Account</th>
                     <th>Voucher</th>
                     <th>Description</th>
                     <th>Coverage</th>
@@ -1066,6 +1074,7 @@ export default function App() {
                       <tr key={item.id}>
                         <td>{item.id}</td>
                         <td>{item.date || '—'}</td>
+                        <td>{item.accountNo || '—'}</td>
                         <td>{item.voucherNo || '—'}</td>
                         <td>{item.description || '—'}</td>
                         <td>{formatMoney(item.coverageAmount)}</td>

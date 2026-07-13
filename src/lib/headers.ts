@@ -24,6 +24,19 @@ const SYNONYMS: Record<StandardField, string[]> = {
     'transactionid',
     'vouchno',
   ],
+  accountNo: [
+    'accountno',
+    'accountnumber',
+    'account',
+    'accountcode',
+    'acno',
+    'acnumber',
+    'glcode',
+    'glaccount',
+    'ledgercode',
+    'codeno',
+    'code',
+  ],
   description: [
     'description',
     'narration',
@@ -120,6 +133,7 @@ export function detectHeaderRow(rows: unknown[][]): number {
   const fields: StandardField[] = [
     'date',
     'voucherNo',
+    'accountNo',
     'description',
     'debit',
     'credit',
@@ -168,6 +182,7 @@ export function suggestMappings(
   const fields: StandardField[] = [
     'date',
     'voucherNo',
+    'accountNo',
     'description',
     'debit',
     'credit',

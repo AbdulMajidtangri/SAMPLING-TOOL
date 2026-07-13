@@ -1,7 +1,6 @@
 export type WizardStep =
   | 'upload'
   | 'worksheet'
-  | 'header'
   | 'mapping'
   | 'confirm'
   | 'objective'

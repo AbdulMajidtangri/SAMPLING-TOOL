@@ -151,6 +151,17 @@ export function detectHeaderRow(rows: unknown[][]): number {
   return bestRow
 }
 
+/** Last non-empty row after the header (auto data end). */
+export function detectDataEnd(rows: unknown[][], headerRow: number): number {
+  let last = headerRow
+  for (let i = headerRow + 1; i < rows.length; i++) {
+    const row = rows[i] ?? []
+    const hasContent = row.some((cell) => String(cell ?? '').trim() !== '')
+    if (hasContent) last = i
+  }
+  return Math.max(last, Math.min(headerRow + 1, rows.length - 1))
+}
+
 export function suggestMappings(
   headers: string[],
 ): Record<StandardField, { columnIndex: number | null; confidence: MappingConfidence; header?: string }> {

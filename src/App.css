@@ -273,6 +273,11 @@ tr.header-row {
   background: #fff1f0;
 }
 
+.map-heading {
+  margin: 22px 0 8px;
+  font-size: 1.05rem;
+}
+
 .lead-inline {
   margin: 0 0 8px;
   color: var(--muted);

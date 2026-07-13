@@ -13,11 +13,10 @@ npm run dev
 
 1. Upload ledger (Excel / CSV)
 2. Choose worksheet
-3. Confirm header row and data range
-4. Map Date / Voucher No / Description / Debit / Credit
-5. Confirm transaction count and coverage value
-6. Record audit objective and choose Path A or Path B
-7. Confirm sample size
-8. Select items (random, systematic, haphazard, block)
-9. Record testing results
-10. Print / export working paper
+3. Confirm auto-detected headers & column mapping (fix only if wrong)
+4. Confirm transaction count and coverage value
+5. Record audit objective and choose Path A or Path B
+6. Confirm sample size
+7. Select items (random, systematic, haphazard, block)
+8. Record testing results
+9. Print / export working paper

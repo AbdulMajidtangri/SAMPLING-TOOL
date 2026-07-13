@@ -24,6 +24,19 @@ const SYNONYMS: Record<StandardField, string[]> = {
     'transactionid',
     'vouchno',
   ],
+  accountNo: [
+    'accountno',
+    'accountnumber',
+    'account',
+    'accountcode',
+    'acno',
+    'acnumber',
+    'glcode',
+    'glaccount',
+    'ledgercode',
+    'codeno',
+    'code',
+  ],
   description: [
     'description',
     'narration',
@@ -43,6 +56,18 @@ const SYNONYMS: Record<StandardField, string[]> = {
     'creditrs',
     'creditpkr',
     'creadit',
+  ],
+  amount: [
+    'amount',
+    'value',
+    'amt',
+    'transactionamount',
+    'paymentamount',
+    'netamount',
+    'grossamount',
+    'localamount',
+    'rs',
+    'pkr',
   ],
 }
 
@@ -108,9 +133,11 @@ export function detectHeaderRow(rows: unknown[][]): number {
   const fields: StandardField[] = [
     'date',
     'voucherNo',
+    'accountNo',
     'description',
     'debit',
     'credit',
+    'amount',
   ]
   let bestRow = 0
   let bestScore = -1
@@ -138,15 +165,28 @@ export function detectHeaderRow(rows: unknown[][]): number {
   return bestRow
 }
 
+/** Last non-empty row after the header (auto data end). */
+export function detectDataEnd(rows: unknown[][], headerRow: number): number {
+  let last = headerRow
+  for (let i = headerRow + 1; i < rows.length; i++) {
+    const row = rows[i] ?? []
+    const hasContent = row.some((cell) => String(cell ?? '').trim() !== '')
+    if (hasContent) last = i
+  }
+  return Math.max(last, Math.min(headerRow + 1, rows.length - 1))
+}
+
 export function suggestMappings(
   headers: string[],
 ): Record<StandardField, { columnIndex: number | null; confidence: MappingConfidence; header?: string }> {
   const fields: StandardField[] = [
     'date',
     'voucherNo',
+    'accountNo',
     'description',
     'debit',
     'credit',
+    'amount',
   ]
   const used = new Set<number>()
   const result = {} as Record<
@@ -181,6 +221,11 @@ export function suggestMappings(
     } else {
       result[field] = { columnIndex: null, confidence: 'none' }
     }
+  }
+
+  // If Debit or Credit was found, clear Amount suggestion to avoid confusion.
+  if (result.debit.columnIndex != null || result.credit.columnIndex != null) {
+    result.amount = { columnIndex: null, confidence: 'none' }
   }
 
   return result

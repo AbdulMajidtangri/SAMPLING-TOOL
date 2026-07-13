@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { buildTransactions, totalCoverageValue } from './lib/coverage'
 import { cellToText, parseLedgerFile } from './lib/excel'
-import { detectHeaderRow, suggestMappings } from './lib/headers'
+import { detectDataEnd, detectHeaderRow, suggestMappings } from './lib/headers'
 import {
   formatMoney,
   pathASampleSize,
@@ -35,7 +35,6 @@ import './App.css'
 const STEPS: WizardStep[] = [
   'upload',
   'worksheet',
-  'header',
   'mapping',
   'confirm',
   'objective',
@@ -48,8 +47,7 @@ const STEPS: WizardStep[] = [
 const STEP_TITLES: Record<WizardStep, string> = {
   upload: 'Upload ledger',
   worksheet: 'Choose worksheet',
-  header: 'Confirm header & range',
-  mapping: 'Map columns',
+  mapping: 'Confirm headers',
   confirm: 'Confirm population',
   objective: 'Audit objective',
   sampleSize: 'Sample size',
@@ -79,9 +77,11 @@ export default function App() {
   >({
     date: { columnIndex: null, confidence: 'none' },
     voucherNo: { columnIndex: null, confidence: 'none' },
+    accountNo: { columnIndex: null, confidence: 'none' },
     description: { columnIndex: null, confidence: 'none' },
     debit: { columnIndex: null, confidence: 'none' },
     credit: { columnIndex: null, confidence: 'none' },
+    amount: { columnIndex: null, confidence: 'none' },
   })
 
   const [transactions, setTransactions] = useState<LedgerTransaction[]>([])
@@ -182,7 +182,7 @@ export default function App() {
     const active = source.sheets[index]
     const detected = detectHeaderRow(active.rows)
     const start = Math.min(detected + 1, Math.max(active.rows.length - 1, 0))
-    const end = Math.max(active.rows.length - 1, start)
+    const end = detectDataEnd(active.rows, detected)
     const headerTexts = (active.rows[detected] ?? []).map((c) => cellToText(c))
     const suggestions = suggestMappings(headerTexts)
 
@@ -199,14 +199,37 @@ export default function App() {
     setWarnings([])
   }
 
+  function applyHeaderRow(rowIndex: number) {
+    if (!sheet) return
+    const start = Math.min(rowIndex + 1, Math.max(sheet.rows.length - 1, 0))
+    const end = detectDataEnd(sheet.rows, rowIndex)
+    const headerTexts = (sheet.rows[rowIndex] ?? []).map((c) => cellToText(c))
+    setHeaderRow(rowIndex)
+    setDataStart(start)
+    setDataEnd(end)
+    setMapping(suggestMappings(headerTexts))
+    setError('')
+  }
+
   function confirmMappingAndBuild() {
     if (!sheet) return
     const mapIndexes = {
       date: mapping.date.columnIndex,
       voucherNo: mapping.voucherNo.columnIndex,
+      accountNo: mapping.accountNo.columnIndex,
       description: mapping.description.columnIndex,
       debit: mapping.debit.columnIndex,
       credit: mapping.credit.columnIndex,
+      amount: mapping.amount.columnIndex,
+    }
+
+    const hasAnyValueColumn =
+      mapIndexes.debit != null || mapIndexes.credit != null || mapIndexes.amount != null
+
+    if (!hasAnyValueColumn) {
+      setWarnings([
+        'No Debit, Credit, or Amount mapped. You can continue for Path A count-based sampling; Path B needs a value column.',
+      ])
     }
 
     const result = buildTransactions({
@@ -437,95 +460,104 @@ export default function App() {
           </section>
         )}
 
-        {step === 'header' && sheet && (
+        {step === 'mapping' && sheet && (
           <section className="card">
-            <div className="grid-3">
+            <p className="lead-inline">
+              The header row and where data starts are detected automatically.
+              Data begins on the row right after the header. You only need to check
+              the column mapping below.
+            </p>
+
+            <div className="auto-note">
               <div>
-                <label htmlFor="headerRow">Header row</label>
-                <input
-                  id="headerRow"
-                  type="number"
-                  min={1}
-                  max={sheet.rows.length}
-                  value={headerRow + 1}
-                  onChange={(e) => {
-                    const value = Math.max(1, Number(e.target.value)) - 1
-                    setHeaderRow(value)
-                    setDataStart(Math.max(value + 1, dataStart))
-                    const texts = (sheet.rows[value] ?? []).map((c) => cellToText(c))
-                    setMapping(suggestMappings(texts))
-                  }}
-                />
+                <span>Header row</span>
+                <strong>Row {headerRow + 1} (auto)</strong>
               </div>
               <div>
-                <label htmlFor="dataStart">Data starts at row</label>
-                <input
-                  id="dataStart"
-                  type="number"
-                  min={headerRow + 2}
-                  max={sheet.rows.length}
-                  value={dataStart + 1}
-                  onChange={(e) => setDataStart(Math.max(0, Number(e.target.value) - 1))}
-                />
+                <span>Data starts</span>
+                <strong>Row {dataStart + 1} (auto)</strong>
               </div>
               <div>
-                <label htmlFor="dataEnd">Data ends at row</label>
-                <input
-                  id="dataEnd"
-                  type="number"
-                  min={dataStart + 1}
-                  max={sheet.rows.length}
-                  value={dataEnd + 1}
-                  onChange={(e) => setDataEnd(Math.max(0, Number(e.target.value) - 1))}
-                />
+                <span>Data ends</span>
+                <strong>Row {dataEnd + 1} (auto)</strong>
+              </div>
+              <div>
+                <span>Rows used</span>
+                <strong>{Math.max(0, dataEnd - dataStart + 1)}</strong>
               </div>
             </div>
+
+            <details className="fix-header">
+              <summary>Header looks wrong? Change it here</summary>
+              <label htmlFor="headerPick">Column title row</label>
+              <select
+                id="headerPick"
+                value={headerRow}
+                onChange={(e) => applyHeaderRow(Number(e.target.value))}
+              >
+                {sheet.rows.slice(0, Math.min(sheet.rows.length, 25)).map((row, index) => {
+                  const label = row
+                    .map((c) => cellToText(c))
+                    .filter(Boolean)
+                    .slice(0, 4)
+                    .join(' · ')
+                  return (
+                    <option key={`hdr-${index}`} value={index}>
+                      Row {index + 1}
+                      {label ? `: ${label}` : ''}
+                    </option>
+                  )
+                })}
+              </select>
+              <p className="hint">
+                If you change the header row, data start/end update automatically.
+              </p>
+            </details>
 
             <div className="preview-table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>#</th>
-                    {headers.slice(0, 8).map((h) => (
-                      <th key={h}>{h}</th>
+                    {headers.slice(0, 8).map((h, hi) => (
+                      <th key={`mh-${hi}`}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {sheet.rows.slice(headerRow, Math.min(headerRow + 6, sheet.rows.length)).map((row, i) => (
-                    <tr key={`preview-${headerRow + i}`} className={i === 0 ? 'header-row' : ''}>
-                      <td>{headerRow + i + 1}</td>
-                      {row.slice(0, 8).map((cell, j) => (
-                        <td key={`${i}-${j}`}>{cellToText(cell)}</td>
-                      ))}
-                    </tr>
-                  ))}
+                  {sheet.rows
+                    .slice(headerRow, Math.min(headerRow + 5, sheet.rows.length))
+                    .map((row, i) => (
+                      <tr
+                        key={`map-preview-${headerRow + i}`}
+                        className={i === 0 ? 'header-row' : ''}
+                      >
+                        <td>{headerRow + i + 1}</td>
+                        {row.slice(0, 8).map((cell, j) => (
+                          <td key={`${i}-${j}`}>{cellToText(cell)}</td>
+                        ))}
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
 
-            <div className="actions">
-              <button type="button" className="ghost" onClick={goBack}>
-                Back
-              </button>
-              <button type="button" className="primary" onClick={goNext}>
-                Confirm range
-              </button>
-            </div>
-          </section>
-        )}
-
-        {step === 'mapping' && (
-          <section className="card">
+            <h3 className="map-heading">Column mapping</h3>
             <p className="lead-inline">
-              Confirm how ledger columns map to the required fields. Extra columns are kept automatically.
+              All fields are optional. Fix any wrong match. Use Amount if the ledger has no
+              Debit/Credit.
             </p>
+
             {(Object.keys(STANDARD_FIELD_LABELS) as StandardField[]).map((field) => (
               <div className="map-row" key={field}>
                 <div>
                   <strong>{STANDARD_FIELD_LABELS[field]}</strong>
                   <span className={confidenceClass(mapping[field].confidence)}>
-                    {mapping[field].confidence}
+                    {mapping[field].columnIndex == null
+                      ? 'not mapped'
+                      : mapping[field].confidence === 'high'
+                        ? 'auto'
+                        : mapping[field].confidence}
                   </span>
                 </div>
                 <select
@@ -541,7 +573,7 @@ export default function App() {
                     }))
                   }}
                 >
-                  <option value="">Select column…</option>
+                  <option value="">Leave empty</option>
                   {headers.map((header, index) => (
                     <option key={`${header}-${index}`} value={index}>
                       {header}
@@ -550,12 +582,13 @@ export default function App() {
                 </select>
               </div>
             ))}
+
             <div className="actions">
               <button type="button" className="ghost" onClick={goBack}>
                 Back
               </button>
               <button type="button" className="primary" onClick={confirmMappingAndBuild}>
-                Confirm mapping
+                Looks correct — continue
               </button>
             </div>
           </section>
@@ -573,33 +606,35 @@ export default function App() {
                 <strong>{formatMoney(coverageTotal)}</strong>
               </div>
             </div>
-            <div className="preview-table-wrap">
+            <p className="lead-inline">
+              Review all {transactions.length} transactions below before confirming.
+            </p>
+            <div className="preview-table-wrap preview-table-all">
               <table>
                 <thead>
                   <tr>
                     <th>ID</th>
                     <th>Date</th>
+                    <th>Account</th>
                     <th>Voucher</th>
                     <th>Description</th>
                     <th>Coverage</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {transactions.slice(0, 8).map((t) => (
+                  {transactions.map((t) => (
                     <tr key={t.id}>
                       <td>{t.id}</td>
-                      <td>{t.date}</td>
-                      <td>{t.voucherNo}</td>
-                      <td>{t.description}</td>
+                      <td>{t.date || '—'}</td>
+                      <td>{t.accountNo || '—'}</td>
+                      <td>{t.voucherNo || '—'}</td>
+                      <td>{t.description || '—'}</td>
                       <td>{formatMoney(t.coverageAmount)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            {transactions.length > 8 && (
-              <p className="hint">Showing first 8 of {transactions.length} transactions.</p>
-            )}
             <div className="actions">
               <button type="button" className="ghost" onClick={goBack}>
                 Back
@@ -795,7 +830,8 @@ export default function App() {
                         onChange={() => toggleHaphazard(t.id)}
                       />
                       <span>
-                        {t.id} · {t.voucherNo || 'No voucher'} · {formatMoney(t.coverageAmount)}
+                        {t.id} · {t.accountNo || t.voucherNo || 'No ref'} ·{' '}
+                        {formatMoney(t.coverageAmount)}
                       </span>
                     </label>
                   ))}
@@ -840,6 +876,7 @@ export default function App() {
                 <thead>
                   <tr>
                     <th>ID</th>
+                    <th>Account</th>
                     <th>Voucher</th>
                     <th>Coverage</th>
                     <th>Exception?</th>
@@ -854,7 +891,8 @@ export default function App() {
                     return (
                       <tr key={item.id}>
                         <td>{item.id}</td>
-                        <td>{item.voucherNo}</td>
+                        <td>{item.accountNo || '—'}</td>
+                        <td>{item.voucherNo || '—'}</td>
                         <td>{formatMoney(item.coverageAmount)}</td>
                         <td>
                           <input
@@ -966,8 +1004,8 @@ export default function App() {
                 {ledger?.sheets[sheetIndex]?.name}
               </p>
               <p>
-                <strong>Header row:</strong> {headerRow + 1} · <strong>Data range:</strong>{' '}
-                {dataStart + 1}–{dataEnd + 1}
+                <strong>Header row:</strong> {headerRow + 1} (auto-detected) ·{' '}
+                <strong>Data rows used:</strong> {dataStart + 1}–{dataEnd + 1}
               </p>
               <p>
                 <strong>Audit objective:</strong> {objective}
@@ -1042,6 +1080,7 @@ export default function App() {
                   <tr>
                     <th>ID</th>
                     <th>Date</th>
+                    <th>Account</th>
                     <th>Voucher</th>
                     <th>Description</th>
                     <th>Coverage</th>
@@ -1054,9 +1093,10 @@ export default function App() {
                     return (
                       <tr key={item.id}>
                         <td>{item.id}</td>
-                        <td>{item.date}</td>
-                        <td>{item.voucherNo}</td>
-                        <td>{item.description}</td>
+                        <td>{item.date || '—'}</td>
+                        <td>{item.accountNo || '—'}</td>
+                        <td>{item.voucherNo || '—'}</td>
+                        <td>{item.description || '—'}</td>
                         <td>{formatMoney(item.coverageAmount)}</td>
                         <td>
                           {row?.exception

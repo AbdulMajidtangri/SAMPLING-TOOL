@@ -1,7 +1,6 @@
 export type WizardStep =
   | 'upload'
   | 'worksheet'
-  | 'header'
   | 'mapping'
   | 'confirm'
   | 'objective'
@@ -10,7 +9,14 @@ export type WizardStep =
   | 'testing'
   | 'workingPaper'
 
-export type StandardField = 'date' | 'voucherNo' | 'description' | 'debit' | 'credit'
+export type StandardField =
+  | 'date'
+  | 'voucherNo'
+  | 'accountNo'
+  | 'description'
+  | 'debit'
+  | 'credit'
+  | 'amount'
 
 export type MappingConfidence = 'high' | 'medium' | 'low' | 'none'
 
@@ -42,6 +48,7 @@ export interface LedgerTransaction {
   rowIndex: number
   date: string
   voucherNo: string
+  accountNo: string
   description: string
   debit: number
   credit: number
@@ -100,11 +107,23 @@ export interface EvaluationState {
 }
 
 export const STANDARD_FIELD_LABELS: Record<StandardField, string> = {
-  date: 'Date',
-  voucherNo: 'Voucher No',
-  description: 'Description',
-  debit: 'Debit',
-  credit: 'Credit',
+  date: 'Date (optional)',
+  voucherNo: 'Voucher No (optional)',
+  accountNo: 'Account No (optional)',
+  description: 'Description (optional)',
+  debit: 'Debit (optional)',
+  credit: 'Credit (optional)',
+  amount: 'Amount (optional — use if no Debit/Credit)',
 }
+
+export const OPTIONAL_FIELDS: StandardField[] = [
+  'date',
+  'voucherNo',
+  'accountNo',
+  'description',
+  'debit',
+  'credit',
+  'amount',
+]
 
 export const TOOL_VERSION = '1.0.0'

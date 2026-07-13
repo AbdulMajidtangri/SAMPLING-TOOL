@@ -1,26 +1,23 @@
-# Sampling Tool
+# Non-Statistical Audit Sampling Tool
 
-Desktop sampling app built with **Electron**, **React**, and **Vite**.
+Desktop app for guided non-statistical audit sampling (ISA 530 / ISA 230 oriented).
 
-## Setup
+## Run
 
 ```bash
 npm install
 npm run dev
 ```
 
-This starts Vite and opens the Electron window.
+## Flow
 
-## Scripts
-
-| Command | Description |
-| --- | --- |
-| `npm run dev` | Run the app in development |
-| `npm run build` | Build renderer + Electron bundles |
-| `npm run electron:build` | Package a Windows installer |
-
-## Features
-
-- Paste a population list (one item per line)
-- Choose sample method: simple random, systematic, or stratified (single group)
-- Draw a sample of the size you need
+1. Upload ledger (Excel / CSV)
+2. Choose worksheet
+3. Confirm header row and data range
+4. Map Date / Voucher No / Description / Debit / Credit
+5. Confirm transaction count and coverage value
+6. Record audit objective and choose Path A or Path B
+7. Confirm sample size
+8. Select items (random, systematic, haphazard, block)
+9. Record testing results
+10. Print / export working paper

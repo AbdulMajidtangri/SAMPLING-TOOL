@@ -283,6 +283,51 @@ tr.header-row {
   color: var(--muted);
 }
 
+.auto-note {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 16px;
+}
+
+.auto-note div {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fafafa;
+}
+
+.auto-note span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-bottom: 4px;
+}
+
+.auto-note strong {
+  font-size: 0.98rem;
+}
+
+.fix-header {
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: #fff;
+}
+
+.fix-header summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+@media (max-width: 800px) {
+  .auto-note {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 .pick-list {
   max-height: 320px;
   overflow: auto;

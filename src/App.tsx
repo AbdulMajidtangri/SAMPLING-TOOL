@@ -463,36 +463,56 @@ export default function App() {
         {step === 'mapping' && sheet && (
           <section className="card">
             <p className="lead-inline">
-              Headers were detected automatically. Check that each field points to the right
-              column. If something is wrong, change it below — data rows are included
-              automatically (no range to set).
+              The header row and where data starts are detected automatically.
+              Data begins on the row right after the header. You only need to check
+              the column mapping below.
             </p>
 
-            <label htmlFor="headerPick">Column title row (auto-detected)</label>
-            <select
-              id="headerPick"
-              value={headerRow}
-              onChange={(e) => applyHeaderRow(Number(e.target.value))}
-            >
-              {sheet.rows.slice(0, Math.min(sheet.rows.length, 25)).map((row, index) => {
-                const label = row
-                  .map((c) => cellToText(c))
-                  .filter(Boolean)
-                  .slice(0, 4)
-                  .join(' · ')
-                return (
-                  <option key={`hdr-${index}`} value={index}>
-                    Row {index + 1}
-                    {label ? `: ${label}` : ''}
-                  </option>
-                )
-              })}
-            </select>
+            <div className="auto-note">
+              <div>
+                <span>Header row</span>
+                <strong>Row {headerRow + 1} (auto)</strong>
+              </div>
+              <div>
+                <span>Data starts</span>
+                <strong>Row {dataStart + 1} (auto)</strong>
+              </div>
+              <div>
+                <span>Data ends</span>
+                <strong>Row {dataEnd + 1} (auto)</strong>
+              </div>
+              <div>
+                <span>Rows used</span>
+                <strong>{Math.max(0, dataEnd - dataStart + 1)}</strong>
+              </div>
+            </div>
 
-            <p className="hint">
-              Using data after the header through row {dataEnd + 1} (
-              {Math.max(0, dataEnd - dataStart + 1)} rows).
-            </p>
+            <details className="fix-header">
+              <summary>Header looks wrong? Change it here</summary>
+              <label htmlFor="headerPick">Column title row</label>
+              <select
+                id="headerPick"
+                value={headerRow}
+                onChange={(e) => applyHeaderRow(Number(e.target.value))}
+              >
+                {sheet.rows.slice(0, Math.min(sheet.rows.length, 25)).map((row, index) => {
+                  const label = row
+                    .map((c) => cellToText(c))
+                    .filter(Boolean)
+                    .slice(0, 4)
+                    .join(' · ')
+                  return (
+                    <option key={`hdr-${index}`} value={index}>
+                      Row {index + 1}
+                      {label ? `: ${label}` : ''}
+                    </option>
+                  )
+                })}
+              </select>
+              <p className="hint">
+                If you change the header row, data start/end update automatically.
+              </p>
+            </details>
 
             <div className="preview-table-wrap">
               <table>

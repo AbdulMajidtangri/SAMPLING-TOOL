@@ -44,6 +44,18 @@ const SYNONYMS: Record<StandardField, string[]> = {
     'creditpkr',
     'creadit',
   ],
+  amount: [
+    'amount',
+    'value',
+    'amt',
+    'transactionamount',
+    'paymentamount',
+    'netamount',
+    'grossamount',
+    'localamount',
+    'rs',
+    'pkr',
+  ],
 }
 
 export function normalizeHeader(value: string): string {
@@ -111,6 +123,7 @@ export function detectHeaderRow(rows: unknown[][]): number {
     'description',
     'debit',
     'credit',
+    'amount',
   ]
   let bestRow = 0
   let bestScore = -1
@@ -147,6 +160,7 @@ export function suggestMappings(
     'description',
     'debit',
     'credit',
+    'amount',
   ]
   const used = new Set<number>()
   const result = {} as Record<
@@ -181,6 +195,11 @@ export function suggestMappings(
     } else {
       result[field] = { columnIndex: null, confidence: 'none' }
     }
+  }
+
+  // If Debit or Credit was found, clear Amount suggestion to avoid confusion.
+  if (result.debit.columnIndex != null || result.credit.columnIndex != null) {
+    result.amount = { columnIndex: null, confidence: 'none' }
   }
 
   return result

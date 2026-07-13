@@ -82,6 +82,7 @@ export default function App() {
     description: { columnIndex: null, confidence: 'none' },
     debit: { columnIndex: null, confidence: 'none' },
     credit: { columnIndex: null, confidence: 'none' },
+    amount: { columnIndex: null, confidence: 'none' },
   })
 
   const [transactions, setTransactions] = useState<LedgerTransaction[]>([])
@@ -207,6 +208,16 @@ export default function App() {
       description: mapping.description.columnIndex,
       debit: mapping.debit.columnIndex,
       credit: mapping.credit.columnIndex,
+      amount: mapping.amount.columnIndex,
+    }
+
+    const hasAnyValueColumn =
+      mapIndexes.debit != null || mapIndexes.credit != null || mapIndexes.amount != null
+
+    if (!hasAnyValueColumn) {
+      setWarnings([
+        'No Debit, Credit, or Amount mapped. You can continue for Path A count-based sampling; Path B needs a value column.',
+      ])
     }
 
     const result = buildTransactions({
@@ -518,14 +529,17 @@ export default function App() {
         {step === 'mapping' && (
           <section className="card">
             <p className="lead-inline">
-              Confirm how ledger columns map to the required fields. Extra columns are kept automatically.
+              All columns are optional. Leave unmapped fields empty if the ledger does not have them.
+              If there is no Debit/Credit, map a single Amount column instead.
             </p>
             {(Object.keys(STANDARD_FIELD_LABELS) as StandardField[]).map((field) => (
               <div className="map-row" key={field}>
                 <div>
                   <strong>{STANDARD_FIELD_LABELS[field]}</strong>
                   <span className={confidenceClass(mapping[field].confidence)}>
-                    {mapping[field].confidence}
+                    {mapping[field].confidence === 'none' && mapping[field].columnIndex == null
+                      ? 'not mapped'
+                      : mapping[field].confidence}
                   </span>
                 </div>
                 <select
@@ -541,7 +555,7 @@ export default function App() {
                     }))
                   }}
                 >
-                  <option value="">Select column…</option>
+                  <option value="">Leave empty (not in this ledger)</option>
                   {headers.map((header, index) => (
                     <option key={`${header}-${index}`} value={index}>
                       {header}
@@ -588,9 +602,9 @@ export default function App() {
                   {transactions.slice(0, 8).map((t) => (
                     <tr key={t.id}>
                       <td>{t.id}</td>
-                      <td>{t.date}</td>
-                      <td>{t.voucherNo}</td>
-                      <td>{t.description}</td>
+                      <td>{t.date || '—'}</td>
+                      <td>{t.voucherNo || '—'}</td>
+                      <td>{t.description || '—'}</td>
                       <td>{formatMoney(t.coverageAmount)}</td>
                     </tr>
                   ))}
@@ -854,7 +868,7 @@ export default function App() {
                     return (
                       <tr key={item.id}>
                         <td>{item.id}</td>
-                        <td>{item.voucherNo}</td>
+                        <td>{item.voucherNo || '—'}</td>
                         <td>{formatMoney(item.coverageAmount)}</td>
                         <td>
                           <input
@@ -1054,9 +1068,9 @@ export default function App() {
                     return (
                       <tr key={item.id}>
                         <td>{item.id}</td>
-                        <td>{item.date}</td>
-                        <td>{item.voucherNo}</td>
-                        <td>{item.description}</td>
+                        <td>{item.date || '—'}</td>
+                        <td>{item.voucherNo || '—'}</td>
+                        <td>{item.description || '—'}</td>
                         <td>{formatMoney(item.coverageAmount)}</td>
                         <td>
                           {row?.exception

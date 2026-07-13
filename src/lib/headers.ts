@@ -1,6 +1,12 @@
-import type { MappingConfidence, StandardField } from './types'
+import type {
+  FieldMappingState,
+  MappingCandidate,
+  MappingConfidence,
+  StandardField,
+} from './types'
+import { cellToText, parseAmount } from './excel'
 
-const SYNONYMS: Record<StandardField, string[]> = {
+export const SYNONYMS: Record<StandardField, string[]> = {
   date: [
     'date',
     'data',
@@ -34,8 +40,6 @@ const SYNONYMS: Record<StandardField, string[]> = {
     'glcode',
     'glaccount',
     'ledgercode',
-    'codeno',
-    'code',
   ],
   description: [
     'description',
@@ -46,6 +50,7 @@ const SYNONYMS: Record<StandardField, string[]> = {
     'memo',
     'explanation',
     'descrip',
+    'descriptiondetails',
   ],
   debit: ['debit', 'dr', 'debitamount', 'debitvalue', 'debitrs', 'debitpkr'],
   credit: [
@@ -66,8 +71,6 @@ const SYNONYMS: Record<StandardField, string[]> = {
     'netamount',
     'grossamount',
     'localamount',
-    'rs',
-    'pkr',
   ],
 }
 
@@ -82,10 +85,8 @@ function levenshtein(a: string, b: string): number {
   const matrix = Array.from({ length: a.length + 1 }, () =>
     Array(b.length + 1).fill(0),
   )
-
   for (let i = 0; i <= a.length; i++) matrix[i][0] = i
   for (let j = 0; j <= b.length; j++) matrix[0][j] = j
-
   for (let i = 1; i <= a.length; i++) {
     for (let j = 1; j <= b.length; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1
@@ -96,7 +97,6 @@ function levenshtein(a: string, b: string): number {
       )
     }
   }
-
   return matrix[a.length][b.length]
 }
 
@@ -105,7 +105,9 @@ export function scoreHeaderMatch(
   field: StandardField,
 ): { score: number; confidence: MappingConfidence } {
   const normalized = normalizeHeader(header)
-  if (!normalized) return { score: 0, confidence: 'none' }
+  if (!normalized || normalized.startsWith('column')) {
+    return { score: 0, confidence: 'none' }
+  }
 
   const synonyms = SYNONYMS[field]
   if (synonyms.includes(normalized)) {
@@ -115,7 +117,7 @@ export function scoreHeaderMatch(
   let best = 0
   for (const synonym of synonyms) {
     if (normalized.includes(synonym) || synonym.includes(normalized)) {
-      best = Math.max(best, 80)
+      best = Math.max(best, 82)
     }
     const distance = levenshtein(normalized, synonym)
     const maxLen = Math.max(normalized.length, synonym.length)
@@ -123,10 +125,44 @@ export function scoreHeaderMatch(
     best = Math.max(best, similarity)
   }
 
-  if (best >= 90) return { score: best, confidence: 'high' }
+  if (best >= 92) return { score: best, confidence: 'high' }
   if (best >= 75) return { score: best, confidence: 'medium' }
   if (best >= 60) return { score: best, confidence: 'low' }
   return { score: best, confidence: 'none' }
+}
+
+function columnLooksLikeDates(values: string[]): boolean {
+  let hits = 0
+  for (const v of values) {
+    if (!v) continue
+    if (/^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(v) || !Number.isNaN(Date.parse(v))) {
+      hits += 1
+    }
+  }
+  return hits >= Math.max(1, Math.floor(values.length * 0.4))
+}
+
+function columnLooksLikeAmounts(values: string[]): boolean {
+  let hits = 0
+  for (const v of values) {
+    if (!v) continue
+    if (parseAmount(v) != null) hits += 1
+  }
+  return hits >= Math.max(1, Math.floor(values.length * 0.5))
+}
+
+function sampleColumnValues(
+  rows: unknown[][],
+  headerRow: number,
+  colIndex: number,
+  limit = 12,
+): string[] {
+  const out: string[] = []
+  for (let r = headerRow + 1; r < rows.length && out.length < limit; r++) {
+    const text = cellToText(rows[r]?.[colIndex])
+    if (text) out.push(text)
+  }
+  return out
 }
 
 export function detectHeaderRow(rows: unknown[][]): number {
@@ -141,44 +177,51 @@ export function detectHeaderRow(rows: unknown[][]): number {
   ]
   let bestRow = 0
   let bestScore = -1
-
   const scanLimit = Math.min(rows.length, 30)
+
   for (let i = 0; i < scanLimit; i++) {
-    const row = rows[i] ?? []
-    const texts = row.map((cell) => String(cell ?? '').trim()).filter(Boolean)
+    const texts = (rows[i] ?? [])
+      .map((cell) => String(cell ?? '').trim())
+      .filter(Boolean)
     if (texts.length < 2) continue
 
     let score = 0
     for (const field of fields) {
-      const match = texts
+      score += texts
         .map((text) => scoreHeaderMatch(text, field).score)
         .reduce((a, b) => Math.max(a, b), 0)
-      score += match
     }
-
     if (score > bestScore) {
       bestScore = score
       bestRow = i
     }
   }
-
   return bestRow
 }
 
-/** Last non-empty row after the header (auto data end). */
 export function detectDataEnd(rows: unknown[][], headerRow: number): number {
   let last = headerRow
   for (let i = headerRow + 1; i < rows.length; i++) {
-    const row = rows[i] ?? []
-    const hasContent = row.some((cell) => String(cell ?? '').trim() !== '')
+    const hasContent = (rows[i] ?? []).some((cell) => String(cell ?? '').trim() !== '')
     if (hasContent) last = i
   }
-  return Math.max(last, Math.min(headerRow + 1, rows.length - 1))
+  return Math.max(last, Math.min(headerRow + 1, Math.max(rows.length - 1, 0)))
+}
+
+function emptyMapping(): FieldMappingState {
+  return {
+    columnIndex: null,
+    confidence: 'none',
+    candidates: [],
+    needsAuditorChoice: false,
+  }
 }
 
 export function suggestMappings(
   headers: string[],
-): Record<StandardField, { columnIndex: number | null; confidence: MappingConfidence; header?: string }> {
+  rows: unknown[][] = [],
+  headerRow = 0,
+): Record<StandardField, FieldMappingState> {
   const fields: StandardField[] = [
     'date',
     'voucherNo',
@@ -188,45 +231,123 @@ export function suggestMappings(
     'credit',
     'amount',
   ]
+  const result = {} as Record<StandardField, FieldMappingState>
   const used = new Set<number>()
-  const result = {} as Record<
-    StandardField,
-    { columnIndex: number | null; confidence: MappingConfidence; header?: string }
-  >
 
   for (const field of fields) {
-    let bestIndex: number | null = null
-    let bestScore = 0
-    let bestConfidence: MappingConfidence = 'none'
-    let bestHeader: string | undefined
+    const candidates: MappingCandidate[] = []
 
     headers.forEach((header, index) => {
-      if (used.has(index) || !header.trim()) return
-      const match = scoreHeaderMatch(header, field)
-      if (match.score > bestScore) {
-        bestScore = match.score
-        bestIndex = index
-        bestConfidence = match.confidence
-        bestHeader = header
+      if (!header.trim()) return
+      let match = scoreHeaderMatch(header, field)
+      if (match.confidence === 'none') return
+
+      // Data-type boost / demote
+      if (rows.length) {
+        const sample = sampleColumnValues(rows, headerRow, index)
+        if (field === 'date' && columnLooksLikeDates(sample)) {
+          match = {
+            score: Math.min(100, match.score + 8),
+            confidence: match.confidence === 'low' ? 'medium' : match.confidence,
+          }
+        }
+        if (
+          (field === 'debit' || field === 'credit' || field === 'amount') &&
+          columnLooksLikeAmounts(sample)
+        ) {
+          match = {
+            score: Math.min(100, match.score + 6),
+            confidence: match.confidence === 'low' ? 'medium' : match.confidence,
+          }
+        }
+        if (field === 'date' && columnLooksLikeAmounts(sample) && !columnLooksLikeDates(sample)) {
+          match = { score: match.score - 20, confidence: 'low' }
+        }
+      }
+
+      if (match.confidence !== 'none' && match.score >= 60) {
+        candidates.push({
+          columnIndex: index,
+          header,
+          score: match.score,
+          confidence: match.confidence,
+        })
       }
     })
 
-    if (bestIndex != null && bestConfidence !== 'none') {
-      used.add(bestIndex)
+    candidates.sort((a, b) => b.score - a.score)
+
+    // Multiple strong date-like matches → auditor must choose (Case 10)
+    const strong = candidates.filter((c) => c.score >= 75)
+    const multipleStrong =
+      (field === 'date' || field === 'voucherNo') && strong.length > 1
+
+    if (multipleStrong) {
       result[field] = {
-        columnIndex: bestIndex,
-        confidence: bestConfidence,
-        header: bestHeader,
+        columnIndex: null,
+        confidence: 'medium',
+        candidates: strong,
+        needsAuditorChoice: true,
       }
-    } else {
-      result[field] = { columnIndex: null, confidence: 'none' }
+      continue
+    }
+
+    const best = candidates[0]
+    if (!best || used.has(best.columnIndex)) {
+      result[field] = emptyMapping()
+      continue
+    }
+
+    used.add(best.columnIndex)
+    result[field] = {
+      columnIndex: best.columnIndex,
+      confidence: best.confidence,
+      candidates: candidates.slice(0, 5),
+      needsAuditorChoice: best.confidence === 'medium' || best.confidence === 'low',
     }
   }
 
-  // If Debit or Credit was found, clear Amount suggestion to avoid confusion.
+  // If Debit or Credit mapped, clear Amount suggestion to avoid confusion
   if (result.debit.columnIndex != null || result.credit.columnIndex != null) {
-    result.amount = { columnIndex: null, confidence: 'none' }
+    if (result.amount.columnIndex != null) {
+      used.delete(result.amount.columnIndex)
+    }
+    result.amount = emptyMapping()
   }
 
   return result
+}
+
+export function validateRequiredMappings(
+  mapping: Record<StandardField, { columnIndex: number | null }>,
+): string[] {
+  const errors: string[] = []
+
+  if (mapping.date.columnIndex == null) {
+    errors.push('Date is required. Map the correct date column (Case: multiple dates need auditor choice).')
+  }
+  if (mapping.description.columnIndex == null) {
+    errors.push('Description is required.')
+  }
+
+  const hasVoucher = mapping.voucherNo.columnIndex != null
+  const hasAltId = mapping.accountNo.columnIndex != null
+  if (!hasVoucher && !hasAltId) {
+    errors.push(
+      'Voucher No is missing. Map Voucher No or an alternative unique ID field (e.g. Account No).',
+    )
+  }
+
+  const hasDebit = mapping.debit.columnIndex != null
+  const hasCredit = mapping.credit.columnIndex != null
+  const hasAmount = mapping.amount.columnIndex != null
+  if (!(hasDebit && hasCredit) && !hasAmount) {
+    if (!hasDebit && !hasCredit) {
+      errors.push('Map Debit and Credit, or map a single Amount column.')
+    } else {
+      errors.push('Both Debit and Credit must be mapped (or use Amount instead).')
+    }
+  }
+
+  return errors
 }

@@ -26,6 +26,8 @@ export type SelectionMethod = 'random' | 'systematic' | 'haphazard' | 'block'
 
 export type RiskScore = 1 | 2 | 3 | 4
 
+export type CoverageResolution = 'useDebit' | 'useCredit' | 'useMax' | 'exclude'
+
 export interface WorkbookSheet {
   name: string
   rows: unknown[][]
@@ -36,11 +38,18 @@ export interface UploadedLedger {
   sheets: WorkbookSheet[]
 }
 
-export interface FieldMapping {
-  field: StandardField
+export interface MappingCandidate {
+  columnIndex: number
+  header: string
+  score: number
+  confidence: MappingConfidence
+}
+
+export interface FieldMappingState {
   columnIndex: number | null
   confidence: MappingConfidence
-  suggestedHeader?: string
+  candidates: MappingCandidate[]
+  needsAuditorChoice: boolean
 }
 
 export interface LedgerTransaction {
@@ -52,8 +61,15 @@ export interface LedgerTransaction {
   description: string
   debit: number
   credit: number
+  amountRaw: number
   coverageAmount: number
   bothSidesWarning: boolean
+  needsCoverageResolution: boolean
+  isRepeatedHeader: boolean
+  looksLikeTotal: boolean
+  excluded: boolean
+  exclusionReason: string
+  coverageResolution?: CoverageResolution
   extras: Record<string, string>
 }
 
@@ -70,6 +86,7 @@ export interface PathBResult {
   requiredCoverageValue: number
   suggestedSampleSize: number
   provisionalIds: string[]
+  provisionalCoverageValue: number
 }
 
 export interface SelectionMeta {
@@ -82,8 +99,11 @@ export interface SelectionMeta {
   blockStart?: number
   biasConfirmed?: boolean
   rationale?: string
+  patternWarning?: string
   timestamp: string
   toolVersion: string
+  dataHash: string
+  selectedIds: string[]
 }
 
 export interface TestingResult {
@@ -106,24 +126,45 @@ export interface EvaluationState {
   untestedRemainderBasis: string
 }
 
-export const STANDARD_FIELD_LABELS: Record<StandardField, string> = {
-  date: 'Date (optional)',
-  voucherNo: 'Voucher No (optional)',
-  accountNo: 'Account No (optional)',
-  description: 'Description (optional)',
-  debit: 'Debit (optional)',
-  credit: 'Credit (optional)',
-  amount: 'Amount (optional — use if no Debit/Credit)',
+export interface FirmConfigSnapshot {
+  toolVersion: string
+  riskScoreMatrix: Array<{ min: number; max: number; size: number }>
+  valueCoverageTiers: Array<{
+    tier: number
+    maxInclusive: number | null
+    percent: number
+    minimumRequired: number
+  }>
+  minimumItemCount: number
+  headerSynonymsVersion: string
+  debitCreditTreatment: string
+  capturedAt: string
 }
 
-export const OPTIONAL_FIELDS: StandardField[] = [
+export interface EngagementMeta {
+  wpReference: string
+  clientName: string
+  auditArea: string
+  period: string
+}
+
+export const STANDARD_FIELD_LABELS: Record<StandardField, string> = {
+  date: 'Date',
+  voucherNo: 'Voucher No',
+  accountNo: 'Account No (optional / alt. ID)',
+  description: 'Description',
+  debit: 'Debit',
+  credit: 'Credit',
+  amount: 'Amount (alt. if no Debit/Credit)',
+}
+
+/** Brief-required core fields (Account No / Amount are allowed alternatives). */
+export const CORE_REQUIRED_FIELDS: StandardField[] = [
   'date',
   'voucherNo',
-  'accountNo',
   'description',
   'debit',
   'credit',
-  'amount',
 ]
 
-export const TOOL_VERSION = '1.0.0'
+export const TOOL_VERSION = '1.1.0'

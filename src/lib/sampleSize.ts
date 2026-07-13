@@ -1,37 +1,27 @@
-import type {
-  LedgerTransaction,
-  PathAInputs,
-  PathBResult,
-  RiskScore,
-} from './types'
+import type { LedgerTransaction, PathAInputs, PathBResult, RiskScore } from './types'
 import { totalCoverageValue } from './coverage'
+import {
+  DEFAULT_MIN_ITEM_COUNT,
+  RISK_SCORE_MATRIX,
+  VALUE_COVERAGE_TIERS,
+} from './firmConfig'
 
-const PATH_A_MATRIX: Array<{ min: number; max: number; size: number }> = [
-  { min: 3, max: 3, size: 15 },
-  { min: 4, max: 5, size: 25 },
-  { min: 6, max: 7, size: 40 },
-  { min: 8, max: 9, size: 60 },
-  { min: 10, max: 12, size: 70 },
-]
-
-const PATH_B_TIERS = [
-  { max: 500_000, percent: 1, minimum: 0, tier: 1 },
-  { max: 2_000_000, percent: 0.6, minimum: 500_000, tier: 2 },
-  { max: 10_000_000, percent: 0.4, minimum: 1_200_000, tier: 3 },
-  { max: Number.POSITIVE_INFINITY, percent: 0.25, minimum: 4_000_000, tier: 4 },
-]
-
-export const DEFAULT_MIN_ITEM_COUNT = 15
+export { DEFAULT_MIN_ITEM_COUNT }
 
 export function pathASampleSize(
   inputs: PathAInputs,
   transactionCount: number,
-): { score: number; calculated: number; finalSize: number } {
+): { score: number; calculated: number; finalSize: number; isHundredPercent: boolean } {
   const score = inputs.riskLevel + inputs.expectedError + inputs.otherEvidence
-  const row = PATH_A_MATRIX.find((r) => score >= r.min && score <= r.max)
+  const row = RISK_SCORE_MATRIX.find((r) => score >= r.min && score <= r.max)
   const calculated = row?.size ?? 15
   const finalSize = Math.min(calculated, transactionCount)
-  return { score, calculated, finalSize }
+  return {
+    score,
+    calculated,
+    finalSize,
+    isHundredPercent: transactionCount > 0 && finalSize === transactionCount,
+  }
 }
 
 export function pathBSizing(
@@ -40,10 +30,18 @@ export function pathBSizing(
 ): PathBResult {
   const total = totalCoverageValue(transactions)
   const tierRule =
-    PATH_B_TIERS.find((t) => total <= t.max) ?? PATH_B_TIERS[PATH_B_TIERS.length - 1]
+    VALUE_COVERAGE_TIERS.find((t) =>
+      t.maxInclusive == null ? true : total <= t.maxInclusive,
+    ) ?? VALUE_COVERAGE_TIERS[VALUE_COVERAGE_TIERS.length - 1]
 
+  // Floor rule: higher of percent value and tier minimum (tier 1 minimum = full value)
   const percentValue = Math.ceil(total * tierRule.percent)
-  const requiredCoverageValue = Math.max(percentValue, tierRule.minimum)
+  const tierMinimum =
+    tierRule.tier === 1 ? total : tierRule.minimumRequired
+  const requiredCoverageValue = Math.min(
+    Math.max(percentValue, tierMinimum),
+    total,
+  )
   const minItems = Math.min(minimumItemCount, transactions.length)
 
   const sorted = [...transactions].sort(
@@ -64,15 +62,17 @@ export function pathBSizing(
     const next = sorted[provisionalIds.length]
     if (!next) break
     provisionalIds.push(next.id)
+    running += next.coverageAmount
   }
 
   return {
     tier: tierRule.tier,
     coveragePercent: tierRule.percent,
-    minimumRequired: tierRule.minimum,
-    requiredCoverageValue: Math.min(requiredCoverageValue, total),
+    minimumRequired: tierMinimum,
+    requiredCoverageValue,
     suggestedSampleSize: Math.min(provisionalIds.length, transactions.length),
     provisionalIds,
+    provisionalCoverageValue: running,
   }
 }
 
@@ -87,4 +87,49 @@ export function scoreLabel(score: RiskScore, kind: keyof PathAInputs): string {
 
 export function formatMoney(value: number): string {
   return `Rs. ${value.toLocaleString('en-PK', { maximumFractionDigits: 0 })}`
+}
+
+export function validateSampleSizeOverride(params: {
+  proposed: number
+  calculated: number
+  minimumFloor: number
+  population: number
+  rationale: string
+  reviewerApproved: boolean
+}): { ok: boolean; error?: string; warning?: string } {
+  const { proposed, calculated, minimumFloor, population, rationale, reviewerApproved } =
+    params
+
+  if (!Number.isFinite(proposed) || proposed < 1) {
+    return { ok: false, error: 'Sample size must be at least 1.' }
+  }
+  if (proposed > population) {
+    return { ok: false, error: 'Sample size cannot exceed confirmed transaction count.' }
+  }
+  if (!rationale.trim()) {
+    return { ok: false, error: 'Sample-size rationale is required.' }
+  }
+  if (proposed < calculated && rationale.trim().length < 20) {
+    return {
+      ok: false,
+      error:
+        'Reducing below calculated/suggested size requires a stronger rationale (at least 20 characters).',
+    }
+  }
+  if (proposed < minimumFloor && proposed < population && !reviewerApproved) {
+    return {
+      ok: false,
+      error: `Reduction below minimum floor (${minimumFloor}) requires reviewer approval.`,
+    }
+  }
+  if (proposed !== calculated) {
+    return {
+      ok: true,
+      warning:
+        proposed > calculated
+          ? 'Sample size increased above calculated/suggested size.'
+          : 'Sample size reduced below calculated/suggested size.',
+    }
+  }
+  return { ok: true }
 }

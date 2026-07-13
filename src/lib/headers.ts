@@ -4,6 +4,7 @@ import type {
   MappingConfidence,
   StandardField,
 } from './types'
+import { MAPPING_FIELD_ORDER, POSITIONAL_FIELD_ORDER } from './types'
 import { cellToText, parseAmount } from './excel'
 
 export const SYNONYMS: Record<StandardField, string[]> = {
@@ -166,15 +167,6 @@ function sampleColumnValues(
 }
 
 export function detectHeaderRow(rows: unknown[][]): number {
-  const fields: StandardField[] = [
-    'date',
-    'voucherNo',
-    'accountNo',
-    'description',
-    'debit',
-    'credit',
-    'amount',
-  ]
   let bestRow = 0
   let bestScore = -1
   const scanLimit = Math.min(rows.length, 30)
@@ -186,7 +178,7 @@ export function detectHeaderRow(rows: unknown[][]): number {
     if (texts.length < 2) continue
 
     let score = 0
-    for (const field of fields) {
+    for (const field of MAPPING_FIELD_ORDER) {
       score += texts
         .map((text) => scoreHeaderMatch(text, field).score)
         .reduce((a, b) => Math.max(a, b), 0)
@@ -222,19 +214,10 @@ export function suggestMappings(
   rows: unknown[][] = [],
   headerRow = 0,
 ): Record<StandardField, FieldMappingState> {
-  const fields: StandardField[] = [
-    'date',
-    'voucherNo',
-    'accountNo',
-    'description',
-    'debit',
-    'credit',
-    'amount',
-  ]
   const result = {} as Record<StandardField, FieldMappingState>
   const used = new Set<number>()
 
-  for (const field of fields) {
+  for (const field of MAPPING_FIELD_ORDER) {
     const candidates: MappingCandidate[] = []
 
     headers.forEach((header, index) => {
@@ -318,23 +301,61 @@ export function suggestMappings(
   return result
 }
 
+/**
+ * Fill still-unmapped core fields from unused columns left-to-right in
+ * Date → Voucher No → Description → Debit → Credit order.
+ * Name-based mappings are kept; Account No / Amount stay optional.
+ */
+export function fillUnmappedByColumnOrder(
+  mapping: Record<StandardField, FieldMappingState>,
+  columnCount: number,
+): Record<StandardField, FieldMappingState> {
+  const result = { ...mapping }
+  for (const field of MAPPING_FIELD_ORDER) {
+    result[field] = { ...mapping[field] }
+  }
+
+  const used = new Set<number>()
+  for (const field of MAPPING_FIELD_ORDER) {
+    const idx = result[field].columnIndex
+    if (idx != null) used.add(idx)
+  }
+
+  for (const field of POSITIONAL_FIELD_ORDER) {
+    if (result[field].columnIndex != null) continue
+    let next = 0
+    while (next < columnCount && used.has(next)) next += 1
+    if (next >= columnCount) break
+    used.add(next)
+    result[field] = {
+      ...result[field],
+      columnIndex: next,
+      confidence: result[field].confidence === 'none' ? 'low' : result[field].confidence,
+      needsAuditorChoice: false,
+    }
+  }
+
+  return result
+}
+
+/** Soft checks only — mapping is optional; does not block continue. */
 export function validateRequiredMappings(
   mapping: Record<StandardField, { columnIndex: number | null }>,
 ): string[] {
-  const errors: string[] = []
+  const warnings: string[] = []
 
   if (mapping.date.columnIndex == null) {
-    errors.push('Date is required. Map the correct date column (Case: multiple dates need auditor choice).')
+    warnings.push('Date is not mapped. Columns will be used in order if you continue.')
   }
   if (mapping.description.columnIndex == null) {
-    errors.push('Description is required.')
+    warnings.push('Description is not mapped.')
   }
 
   const hasVoucher = mapping.voucherNo.columnIndex != null
   const hasAltId = mapping.accountNo.columnIndex != null
   if (!hasVoucher && !hasAltId) {
-    errors.push(
-      'Voucher No is missing. Map Voucher No or an alternative unique ID field (e.g. Account No).',
+    warnings.push(
+      'Voucher No is not mapped. Map Voucher No or Account No, or rely on column order.',
     )
   }
 
@@ -343,11 +364,11 @@ export function validateRequiredMappings(
   const hasAmount = mapping.amount.columnIndex != null
   if (!(hasDebit && hasCredit) && !hasAmount) {
     if (!hasDebit && !hasCredit) {
-      errors.push('Map Debit and Credit, or map a single Amount column.')
+      warnings.push('Debit/Credit (or Amount) not mapped — column order will be used if possible.')
     } else {
-      errors.push('Both Debit and Credit must be mapped (or use Amount instead).')
+      warnings.push('Both Debit and Credit should be mapped (or use Amount instead).')
     }
   }
 
-  return errors
+  return warnings
 }

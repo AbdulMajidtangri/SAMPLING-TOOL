@@ -10,6 +10,7 @@ import { cellToText, parseLedgerFile } from './lib/excel'
 import {
   detectDataEnd,
   detectHeaderRow,
+  fillUnmappedByColumnOrder,
   suggestMappings,
   validateRequiredMappings,
 } from './lib/headers'
@@ -49,7 +50,7 @@ import type {
   UploadedLedger,
   WizardStep,
 } from './lib/types'
-import { STANDARD_FIELD_LABELS, TOOL_VERSION } from './lib/types'
+import { MAPPING_FIELD_ORDER, STANDARD_FIELD_LABELS, TOOL_VERSION } from './lib/types'
 import './App.css'
 
 const STEPS: WizardStep[] = [
@@ -76,16 +77,6 @@ const STEP_TITLES: Record<WizardStep, string> = {
   workingPaper: 'Working paper',
 }
 
-const MAPPING_FIELDS: StandardField[] = [
-  'date',
-  'voucherNo',
-  'accountNo',
-  'description',
-  'debit',
-  'credit',
-  'amount',
-]
-
 const DEFAULT_SELECTION_METHOD: SelectionMethod = 'random'
 const DEFAULT_SIZE_RATIONALE = 'Accepted calculated / suggested sample size.'
 
@@ -95,7 +86,7 @@ function confidenceClass(confidence: MappingConfidence): string {
 
 function emptyMapping(): Record<StandardField, FieldMappingState> {
   const result = {} as Record<StandardField, FieldMappingState>
-  for (const field of MAPPING_FIELDS) {
+  for (const field of MAPPING_FIELD_ORDER) {
     result[field] = {
       columnIndex: null,
       confidence: 'none',
@@ -204,12 +195,12 @@ export default function App() {
 
   const selectedCoverage = useMemo(() => totalCoverageValue(selected), [selected])
 
-  const mappingErrors = useMemo(
+  const mappingWarnings = useMemo(
     () => (sheet ? validateRequiredMappings(mapping) : []),
     [mapping, sheet],
   )
   const needsChoiceFields = useMemo(
-    () => MAPPING_FIELDS.filter((f) => mapping[f].needsAuditorChoice),
+    () => MAPPING_FIELD_ORDER.filter((f) => mapping[f].needsAuditorChoice),
     [mapping],
   )
 
@@ -344,14 +335,13 @@ export default function App() {
 
   function confirmMappingAndBuild() {
     if (!sheet) return
-    const errors = validateRequiredMappings(mapping)
-    if (errors.length) {
-      setError(errors.join('  •  '))
-      return
-    }
 
-    const mapIndexes = MAPPING_FIELDS.reduce((acc, field) => {
-      acc[field] = mapping[field].columnIndex
+    const headerTexts = (sheet.rows[headerRow] ?? []).map((c) => cellToText(c))
+    const resolved = fillUnmappedByColumnOrder(mapping, headerTexts.length)
+    setMapping(resolved)
+
+    const mapIndexes = MAPPING_FIELD_ORDER.reduce((acc, field) => {
+      acc[field] = resolved[field].columnIndex
       return acc
     }, {} as Record<StandardField, number | null>)
 
@@ -709,8 +699,10 @@ export default function App() {
           <section className="card">
             <p className="lead-inline">
               The header row and where data starts are detected automatically.
-              Data begins on the row right after the header. You only need to check
-              the column mapping below.
+              Data begins on the row right after the header. Column mapping is
+              optional — if the right headers are already present, you can continue
+              without mapping every field. Unmapped columns are filled in order:
+              Date, Voucher No, Description, Debit, Credit.
             </p>
 
             <div className="auto-note">
@@ -787,11 +779,18 @@ export default function App() {
               </table>
             </div>
 
-            <h3 className="map-heading">Column mapping</h3>
+            <h3 className="map-heading">Column mapping (optional)</h3>
             <p className="lead-inline">
-              Account No and Amount are optional alternatives — use Amount if the ledger
-              has no Debit/Credit, and Account No if there is no Voucher No.
+              Adjust only if auto-detect looks wrong. Account No and Amount are
+              optional alternatives — use Amount if the ledger has no Debit/Credit,
+              and Account No if there is no Voucher No.
             </p>
+
+            {mappingWarnings.length > 0 && (
+              <div className="banner warn">
+                {mappingWarnings.join('  •  ')}
+              </div>
+            )}
 
             {needsChoiceFields.length > 0 && (
               <div className="banner warn">
@@ -800,7 +799,7 @@ export default function App() {
               </div>
             )}
 
-            {MAPPING_FIELDS.map((field) => {
+            {MAPPING_FIELD_ORDER.map((field) => {
               const state = mapping[field]
               return (
                 <div className="map-row" key={field}>
@@ -863,7 +862,6 @@ export default function App() {
                 type="button"
                 className="primary"
                 onClick={confirmMappingAndBuild}
-                disabled={mappingErrors.length > 0}
               >
                 Looks correct — continue
               </button>

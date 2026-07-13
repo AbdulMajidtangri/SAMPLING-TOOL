@@ -158,6 +158,32 @@ export const STANDARD_FIELD_LABELS: Record<StandardField, string> = {
   amount: 'Amount (alt. if no Debit/Credit)',
 }
 
+/**
+ * UI + auto-suggest processing order.
+ * Core ledger columns first, then optional alternatives.
+ */
+export const MAPPING_FIELD_ORDER: StandardField[] = [
+  'date',
+  'voucherNo',
+  'description',
+  'debit',
+  'credit',
+  'accountNo',
+  'amount',
+]
+
+/**
+ * Left-to-right positional fallback when a column is still unmapped
+ * (e.g. generic headers). Matches the usual ledger layout.
+ */
+export const POSITIONAL_FIELD_ORDER: StandardField[] = [
+  'date',
+  'voucherNo',
+  'description',
+  'debit',
+  'credit',
+]
+
 /** Brief-required core fields (Account No / Amount are allowed alternatives). */
 export const CORE_REQUIRED_FIELDS: StandardField[] = [
   'date',

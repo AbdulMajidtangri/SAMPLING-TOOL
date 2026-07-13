@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildTransactions, coverageFromDebitCredit, totalCoverageValue } from './coverage'
 import {
   detectHeaderRow,
+  fillUnmappedByColumnOrder,
   normalizeHeader,
   scoreHeaderMatch,
   suggestMappings,
@@ -131,13 +132,37 @@ describe('header edge cases', () => {
     expect(result.transactions.some((t) => t.isRepeatedHeader && t.excluded)).toBe(true)
   })
 
-  it('Case 9: missing voucher no hard stop unless alt ID', () => {
+  it('Case 9: missing voucher no warns unless alt ID (no hard stop)', () => {
     const missing = suggestMappings(['Date', 'Description', 'Debit', 'Credit'])
-    const errors = validateRequiredMappings(missing)
-    expect(errors.some((e) => /Voucher No/i.test(e))).toBe(true)
+    const warnings = validateRequiredMappings(missing)
+    expect(warnings.some((e) => /Voucher No/i.test(e))).toBe(true)
 
     const ok = suggestMappings(['Date', 'Account No', 'Description', 'Debit', 'Credit'])
     expect(validateRequiredMappings(ok)).toHaveLength(0)
+  })
+
+  it('positional order fills unmapped core columns left-to-right', () => {
+    const empty = suggestMappings(['Col A', 'Col B', 'Col C', 'Col D', 'Col E'])
+    const filled = fillUnmappedByColumnOrder(empty, 5)
+    expect(filled.date.columnIndex).toBe(0)
+    expect(filled.voucherNo.columnIndex).toBe(1)
+    expect(filled.description.columnIndex).toBe(2)
+    expect(filled.debit.columnIndex).toBe(3)
+    expect(filled.credit.columnIndex).toBe(4)
+    expect(validateRequiredMappings(filled)).toHaveLength(0)
+  })
+
+  it('positional order keeps name-based mappings and only fills gaps', () => {
+    const partial = suggestMappings(['Date', 'Narration', 'Debit', 'Credit', 'Extra'])
+    // voucher still missing by name
+    expect(partial.voucherNo.columnIndex).toBeNull()
+    const filled = fillUnmappedByColumnOrder(partial, 5)
+    expect(filled.date.columnIndex).toBe(0)
+    expect(filled.description.columnIndex).toBe(1)
+    expect(filled.debit.columnIndex).toBe(2)
+    expect(filled.credit.columnIndex).toBe(3)
+    // first unused column becomes voucher
+    expect(filled.voucherNo.columnIndex).toBe(4)
   })
 
   it('Case 10: multiple date columns require auditor choice', () => {

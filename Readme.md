@@ -19,7 +19,7 @@ npm test
 
 1. Upload ledger  
 2. Choose worksheet  
-3. Confirm auto header + column mapping (hard stops if required fields missing)  
+3. Confirm auto header + column mapping (optional — continue anytime; unmapped core columns fill in Date → Voucher No → Description → Debit → Credit order)  
 4. Confirm population (resolve Debit+Credit conflicts; exclude rows with reason)  
 5. Audit objective / sampling unit / engagement details + Path A or B  
 6. Confirm sample size (overrides documented; below-floor needs reviewer approval)  

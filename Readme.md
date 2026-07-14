@@ -26,9 +26,9 @@ npm test
 7. Testing results  
 8. Working paper (sign-off, lock, amendment control tied to file-assembly deadline)
 
-## Sample size guidance
+## Sample size — two paths
 
-- Population ≤ 30 + high / very high risk → **60–70%** of population (default 60%), rounded up  
-- Population > 30 → firm coverage % by risk (ceil); auditor may increase; reduce needs rationale + reviewer approval  
+- **Path A (risk matrix):** risk + expected error + other evidence → firm matrix size. For ≤30 high-risk populations, also apply **60–70%** count coverage (default 60%) and take the higher result.
+- **Path B (value coverage):** monetary tier % of population value → suggested item count. Selection method still chooses *which* items.
 
-Sample size is always confirmed **before** item selection. No statistical confidence levels are calculated.
+Auditor picks the path at Planning. Sample size is confirmed before item selection. No statistical confidence levels are calculated.

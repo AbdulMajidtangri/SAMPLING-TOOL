@@ -9,7 +9,9 @@ import {
   validateRequiredMappings,
 } from './headers'
 import {
-  suggestResidualSampleSize,
+  pathASampleSize,
+  pathBSizing,
+  suggestSampleSizeForPath,
   validateSampleSizeOverride,
 } from './sampleSize'
 import { selectRandom, selectSystematic, selectBlock } from './selection'
@@ -221,32 +223,71 @@ describe('coverage amount rules', () => {
   })
 })
 
-describe('residual sample size guidance', () => {
-  it('small high-risk population uses 60% default band', () => {
-    const r = suggestResidualSampleSize({
-      residualCount: 20,
-      riskLevel: 'high',
-    })
+describe('sample size paths', () => {
+  it('Path A: small high-risk applies 60% coverage band vs matrix', () => {
+    const r = pathASampleSize(
+      { riskLevel: 3, expectedError: 2, otherEvidence: 2 },
+      20,
+    )
+    // matrix score 7 → 40, but pop is 20 so capped; coverage 60% of 20 = 12; max(40,12)=40 → cap 20
     expect(r.coveragePercent).toBe(0.6)
-    expect(r.suggestedSize).toBe(12)
+    expect(r.coverageSize).toBe(12)
+    expect(r.finalSize).toBe(20)
   })
 
-  it('small high-risk allows 60–70% override', () => {
-    const r = suggestResidualSampleSize({
-      residualCount: 20,
-      riskLevel: 'veryHigh',
-      coveragePercentOverride: 0.7,
-    })
+  it('Path A: small high-risk allows 60–70% override', () => {
+    const r = pathASampleSize(
+      { riskLevel: 4, expectedError: 1, otherEvidence: 1 },
+      20,
+      0.7,
+    )
     expect(r.coveragePercent).toBe(0.7)
-    expect(r.suggestedSize).toBe(14)
+    expect(r.coverageSize).toBe(14)
   })
 
-  it('large population uses risk coverage percent', () => {
-    const r = suggestResidualSampleSize({
-      residualCount: 100,
-      riskLevel: 'high',
+  it('Path A: large population uses matrix and count coverage', () => {
+    const r = pathASampleSize(
+      { riskLevel: 3, expectedError: 2, otherEvidence: 2 },
+      100,
+    )
+    // score 7 → matrix 40; high risk large pop 40% → 40; final 40
+    expect(r.finalSize).toBe(40)
+  })
+
+  it('Path B: value coverage suggests item count from tiers', () => {
+    const pop = Array.from({ length: 40 }, (_, i) =>
+      tx({
+        id: `R${i}`,
+        rowIndex: i,
+        coverageAmount: 20_000,
+        debit: 20_000,
+      }),
+    )
+    // total 800_000 → tier 2 @ 60% min 500k → need 500k → 25 items of 20k
+    const b = pathBSizing(pop)
+    expect(b.tier).toBe(2)
+    expect(b.suggestedSampleSize).toBeGreaterThanOrEqual(15)
+  })
+
+  it('suggestSampleSizeForPath routes to Path A or B', () => {
+    const pop = Array.from({ length: 50 }, (_, i) =>
+      tx({ id: `R${i}`, rowIndex: i, coverageAmount: 10_000, debit: 10_000 }),
+    )
+    const a = suggestSampleSizeForPath({
+      path: 'pathA',
+      pathA: { riskLevel: 2, expectedError: 2, otherEvidence: 2 },
+      transactions: pop,
     })
-    expect(r.suggestedSize).toBe(40)
+    expect(a.pathADetail).not.toBeNull()
+    expect(a.pathBDetail).toBeNull()
+
+    const b = suggestSampleSizeForPath({
+      path: 'pathB',
+      pathA: { riskLevel: 2, expectedError: 2, otherEvidence: 2 },
+      transactions: pop,
+    })
+    expect(b.pathBDetail).not.toBeNull()
+    expect(b.pathADetail).toBeNull()
   })
 
   it('override below suggested size needs reviewer approval', () => {

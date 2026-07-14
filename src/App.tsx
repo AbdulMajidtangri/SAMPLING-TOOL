@@ -4,7 +4,6 @@ import {
   buildTransactions,
   resolveTransactionCoverage,
   totalCoverageValue,
-  unresolvedBothSides,
 } from './lib/coverage'
 import { cellToText, parseLedgerFile } from './lib/excel'
 import {
@@ -38,12 +37,10 @@ import {
   TEST_TYPE_OPTIONS,
   captureFirmConfigSnapshot,
 } from './lib/firmConfig'
-import { applyStratumKeys, separateHighValue, stratumSummary } from './lib/highValue'
 import { recommendMethod } from './lib/methodRecommend'
 import { buildPopulationSummary } from './lib/populationSummary'
 import { hashExtractedData } from './lib/hash'
 import type {
-  CoverageResolution,
   DesignInputs,
   EngagementMeta,
   EvaluationState,
@@ -58,7 +55,6 @@ import type {
   SelectionMethod,
   SignOffState,
   StandardField,
-  StratificationBasis,
   TestingResult,
   UploadedLedger,
   WizardStep,
@@ -75,10 +71,7 @@ const STEPS: WizardStep[] = [
   'upload',
   'worksheet',
   'mapping',
-  'clean',
   'planning',
-  'highValue',
-  'stratify',
   'design',
   'selection',
   'testing',
@@ -89,10 +82,7 @@ const STEP_TITLES: Record<WizardStep, string> = {
   upload: 'Upload ledger',
   worksheet: 'Choose worksheet',
   mapping: 'Headers & column mapping',
-  clean: 'Clean population',
   planning: 'Planning inputs',
-  highValue: 'High-value separation',
-  stratify: 'Stratification (design)',
   design: 'Method, size & sampling risk',
   selection: 'Generate sample',
   testing: 'Testing results',
@@ -100,7 +90,7 @@ const STEP_TITLES: Record<WizardStep, string> = {
 }
 
 const DEFAULT_SIZE_RATIONALE =
-  'Accepted suggested residual coverage per firm guidance.'
+  'Accepted suggested population coverage per firm guidance.'
 const DEFAULT_SAMPLING_UNIT = 'Individual expense voucher / document'
 const DEFAULT_HIGH_VALUE_BASIS =
   'Absolute coverage amount at or above the stated threshold (specific testing, not sampling).'
@@ -220,16 +210,12 @@ export default function App() {
   )
 
   const [transactions, setTransactions] = useState<LedgerTransaction[]>([])
-  const [excludeDrafts, setExcludeDrafts] = useState<Record<string, string>>({})
   const [populationSummary, setPopulationSummary] = useState<PopulationSummary | null>(
     null,
   )
 
   const [engagement, setEngagement] = useState<EngagementMeta>(defaultEngagement())
   const [designInputs, setDesignInputs] = useState<DesignInputs>(defaultDesignInputs())
-
-  const [highValueItems, setHighValueItems] = useState<LedgerTransaction[]>([])
-  const [residualItems, setResidualItems] = useState<LedgerTransaction[]>([])
 
   const [sampleDesign, setSampleDesign] = useState<SampleDesignState>(
     defaultSampleDesign(),
@@ -263,10 +249,6 @@ export default function App() {
   }, [sheet, headerRow])
 
   const activePop = useMemo(() => activeTransactions(transactions), [transactions])
-  const unresolvedCount = useMemo(
-    () => unresolvedBothSides(transactions),
-    [transactions],
-  )
   const dataHash = useMemo(() => hashExtractedData(transactions), [transactions])
 
   const liveSummary = useMemo(
@@ -274,44 +256,18 @@ export default function App() {
     [transactions],
   )
 
-  const liveHvSplit = useMemo(
-    () =>
-      separateHighValue(
-        activePop,
-        designInputs.highValueThreshold > 0
-          ? designInputs.highValueThreshold
-          : Number.POSITIVE_INFINITY,
-      ),
-    [activePop, designInputs.highValueThreshold],
-  )
-
-  const residualForDesign = useMemo(
-    () => (residualItems.length || highValueItems.length ? residualItems : liveHvSplit.residual),
-    [residualItems, highValueItems.length, liveHvSplit.residual],
-  )
-
-  const hvForDesign = useMemo(
-    () => (residualItems.length || highValueItems.length ? highValueItems : liveHvSplit.highValue),
-    [highValueItems, residualItems.length, liveHvSplit.highValue],
-  )
-
-  const strataRows = useMemo(
-    () => stratumSummary(residualForDesign),
-    [residualForDesign],
-  )
-
   const methodRecommendation = useMemo(
     () =>
       recommendMethod({
-        residual: residualForDesign,
+        residual: activePop,
         riskLevel: designInputs.riskLevel,
-        highValueCount: hvForDesign.length,
+        highValueCount: 0,
       }),
-    [residualForDesign, designInputs.riskLevel, hvForDesign.length],
+    [activePop, designInputs.riskLevel],
   )
 
   const sizeSuggestion = useMemo(() => {
-    const residualCount = residualForDesign.length
+    const residualCount = activePop.length
     const allowBand =
       residualCount <= 30 &&
       (designInputs.riskLevel === 'high' || designInputs.riskLevel === 'veryHigh')
@@ -320,7 +276,7 @@ export default function App() {
       riskLevel: designInputs.riskLevel,
       coveragePercentOverride: allowBand ? coveragePercentOverride : null,
     })
-  }, [residualForDesign.length, designInputs.riskLevel, coveragePercentOverride])
+  }, [activePop.length, designInputs.riskLevel, coveragePercentOverride])
 
   const mappingWarnings = useMemo(
     () => (sheet ? validateRequiredMappings(mapping) : []),
@@ -332,15 +288,10 @@ export default function App() {
   )
 
   const selectedCoverage = useMemo(() => totalCoverageValue(selected), [selected])
-  const hvCoverage = useMemo(() => totalCoverageValue(hvForDesign), [hvForDesign])
-  const residualCoverage = useMemo(
-    () => totalCoverageValue(residualForDesign),
-    [residualForDesign],
-  )
 
   const stepIndex = STEPS.indexOf(step)
   const smallHighRiskBand =
-    residualForDesign.length <= 30 &&
+    activePop.length <= 30 &&
     (designInputs.riskLevel === 'high' || designInputs.riskLevel === 'veryHigh')
 
   function goNext() {
@@ -359,42 +310,17 @@ export default function App() {
    */
   function invalidateFrom(fromStep: WizardStep) {
     const idx = STEPS.indexOf(fromStep)
-    const cleanIdx = STEPS.indexOf('clean')
+    const mappingIdx = STEPS.indexOf('mapping')
     const planningIdx = STEPS.indexOf('planning')
-    const highValueIdx = STEPS.indexOf('highValue')
-    const stratifyIdx = STEPS.indexOf('stratify')
     const designIdx = STEPS.indexOf('design')
     const selectionIdx = STEPS.indexOf('selection')
     const testingIdx = STEPS.indexOf('testing')
 
-    if (idx < cleanIdx) {
+    if (idx <= mappingIdx) {
       setTransactions([])
-      setExcludeDrafts({})
       setPopulationSummary(null)
     }
-    if (idx <= cleanIdx) {
-      setPopulationSummary(null)
-    }
-    if (idx < planningIdx) {
-      // engagement kept editable but downstream design cleared below
-    }
-    if (idx <= highValueIdx) {
-      setHighValueItems([])
-      setResidualItems([])
-    }
-    if (idx < stratifyIdx) {
-      setDesignInputs((prev) => ({
-        ...prev,
-        stratificationBasis: idx < highValueIdx ? 'none' : prev.stratificationBasis,
-        stratificationOther: idx < highValueIdx ? '' : prev.stratificationOther,
-      }))
-    }
-    if (idx <= stratifyIdx) {
-      setResidualItems((prev) =>
-        prev.map((t) => ({ ...t, stratumKey: 'all' })),
-      )
-    }
-    if (idx < designIdx) {
+    if (idx <= planningIdx) {
       setSampleDesign(defaultSampleDesign())
       setCoveragePercentOverride(SMALL_POP_HIGH_RISK_DEFAULT_PCT)
       setSizeWarning('')
@@ -518,68 +444,20 @@ export default function App() {
       return
     }
 
+    const resolvedTransactions = result.transactions.map((t) =>
+      t.needsCoverageResolution ? resolveTransactionCoverage(t, 'useMax') : t,
+    )
+    const active = activeTransactions(resolvedTransactions)
+    if (active.length === 0) {
+      setError('No active transactions remain after mapping. Check the worksheet and column mapping.')
+      return
+    }
+
     invalidateFrom('mapping')
     setError('')
     setWarnings(result.warnings)
-    setTransactions(result.transactions)
-    setPopulationSummary(buildPopulationSummary(result.transactions))
-    setStep('clean')
-  }
-
-  function resolveRow(id: string, resolution: CoverageResolution) {
-    setTransactions((prev) => {
-      const next = prev.map((t) =>
-        t.id === id ? resolveTransactionCoverage(t, resolution) : t,
-      )
-      setPopulationSummary(buildPopulationSummary(next))
-      return next
-    })
-    invalidateFrom('clean')
-  }
-
-  function excludeRow(id: string) {
-    const reason = (excludeDrafts[id] ?? '').trim()
-    if (!reason) {
-      setError('Please enter a reason before excluding this row.')
-      return
-    }
-    setTransactions((prev) => {
-      const next = prev.map((t) =>
-        t.id === id ? { ...t, excluded: true, exclusionReason: reason } : t,
-      )
-      setPopulationSummary(buildPopulationSummary(next))
-      return next
-    })
-    setExcludeDrafts((prev) => ({ ...prev, [id]: '' }))
-    invalidateFrom('clean')
-    setError('')
-  }
-
-  function restoreRow(id: string) {
-    setTransactions((prev) => {
-      const next = prev.map((t) =>
-        t.id === id ? { ...t, excluded: false, exclusionReason: '' } : t,
-      )
-      setPopulationSummary(buildPopulationSummary(next))
-      return next
-    })
-    invalidateFrom('clean')
-  }
-
-  function continueFromClean() {
-    if (unresolvedCount > 0) {
-      setError(
-        `${unresolvedCount} row(s) still need Debit/Credit resolution before continuing.`,
-      )
-      return
-    }
-    if (activePop.length === 0) {
-      setError('No active transactions remain. Restore or fix rows before continuing.')
-      return
-    }
-    const summary = buildPopulationSummary(transactions)
-    setPopulationSummary(summary)
-    setError('')
+    setTransactions(resolvedTransactions)
+    setPopulationSummary(buildPopulationSummary(resolvedTransactions))
     setStep('planning')
   }
 
@@ -600,70 +478,23 @@ export default function App() {
       setError(`Please complete: ${missing.join(', ')}.`)
       return
     }
-    setError('')
-    setStep('highValue')
-  }
 
-  function continueFromHighValue() {
-    const split = separateHighValue(
-      activePop,
-      designInputs.highValueThreshold > 0
-        ? designInputs.highValueThreshold
-        : Number.POSITIVE_INFINITY,
-    )
-    if (split.highValue.length === 0 && split.residual.length === 0) {
-      setError('No items remain after high-value separation.')
+    const pop = activeTransactions(transactions)
+    if (pop.length === 0) {
+      setError('No active transactions remain for sampling.')
       return
     }
-    setHighValueItems(split.highValue)
-    setResidualItems(split.residual.map((t) => ({ ...t, stratumKey: 'all' })))
-    if (split.residual.length === 0) {
-      setWarnings([
-        'Residual population is empty — all active items are high-value and will be tested as specific items (100% specific testing, no sampling).',
-      ])
-    } else {
-      setWarnings([])
-    }
-    setError('')
-    setStep('stratify')
-  }
 
-  function continueFromStratify() {
-    const keyed = applyStratumKeys(
-      residualItems.length ? residualItems : liveHvSplit.residual,
-      designInputs.stratificationBasis,
-      designInputs.stratificationOther || undefined,
-    )
-    setResidualItems(keyed)
-    if (!highValueItems.length && !residualItems.length) {
-      const split = separateHighValue(
-        activePop,
-        designInputs.highValueThreshold > 0
-          ? designInputs.highValueThreshold
-          : Number.POSITIVE_INFINITY,
-      )
-      setHighValueItems(split.highValue)
-      setResidualItems(
-        applyStratumKeys(
-          split.residual,
-          designInputs.stratificationBasis,
-          designInputs.stratificationOther || undefined,
-        ),
-      )
-    }
     const recommendation = recommendMethod({
-      residual: keyed,
+      residual: pop,
       riskLevel: designInputs.riskLevel,
-      highValueCount: (highValueItems.length
-        ? highValueItems
-        : liveHvSplit.highValue
-      ).length,
+      highValueCount: 0,
     })
     const suggestion = suggestResidualSampleSize({
-      residualCount: keyed.length,
+      residualCount: pop.length,
       riskLevel: designInputs.riskLevel,
       coveragePercentOverride:
-        keyed.length <= 30 &&
+        pop.length <= 30 &&
         (designInputs.riskLevel === 'high' || designInputs.riskLevel === 'veryHigh')
           ? coveragePercentOverride
           : null,

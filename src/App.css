@@ -174,6 +174,19 @@ textarea {
   gap: 12px;
 }
 
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.path-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 16px;
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -338,6 +351,110 @@ tr.header-row {
   }
 }
 
+.needs-choice {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--warn-ink);
+  border: 1px solid #f5d78e;
+  background: #fff8e8;
+}
+
+.candidate-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.candidate-chip {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+}
+
+.candidate-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: #eef5ff;
+}
+
+.excluded-row {
+  opacity: 0.55;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.small-btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.small-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.exclude-input {
+  width: 160px;
+  padding: 6px 8px;
+  font-size: 0.82rem;
+}
+
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 0;
+  font-weight: 500;
+}
+
+.check-row input {
+  width: auto;
+  margin-top: 3px;
+}
+
+.wp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 24px;
+  margin-bottom: 8px;
+}
+
+.wp-grid p {
+  margin: 4px 0;
+}
+
+.config-json {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #fafafa;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 0.82rem;
+  max-height: 320px;
+  overflow: auto;
+}
+
 .pick-list {
   max-height: 320px;
   overflow: auto;
@@ -387,6 +504,7 @@ tr.header-row {
   }
 
   .grid-3,
+  .grid-2,
   .map-row {
     grid-template-columns: 1fr;
   }

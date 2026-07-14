@@ -1,5 +1,6 @@
 import type { LedgerTransaction, SelectionMeta, SelectionMethod } from './types'
 import { TOOL_VERSION } from './types'
+import { hashExtractedData } from './hash'
 
 function mulberry32(seed: number) {
   return function next() {
@@ -19,6 +20,22 @@ function hashSeed(seed: string): number {
   return h >>> 0
 }
 
+function baseMeta(
+  method: SelectionMethod,
+  selected: LedgerTransaction[],
+  population: LedgerTransaction[],
+  extra: Partial<SelectionMeta> = {},
+): SelectionMeta {
+  return {
+    method,
+    timestamp: new Date().toISOString(),
+    toolVersion: TOOL_VERSION,
+    dataHash: hashExtractedData(population),
+    selectedIds: selected.map((t) => t.id),
+    ...extra,
+  }
+}
+
 export function selectRandom(
   transactions: LedgerTransaction[],
   size: number,
@@ -33,13 +50,10 @@ export function selectRandom(
   const selected = copy.slice(0, size)
   return {
     selected,
-    meta: {
-      method: 'random',
+    meta: baseMeta('random', selected, transactions, {
       seed,
       rngAlgorithm: 'mulberry32',
-      timestamp: new Date().toISOString(),
-      toolVersion: TOOL_VERSION,
-    },
+    }),
   }
 }
 
@@ -47,20 +61,20 @@ export function selectSystematic(
   transactions: LedgerTransaction[],
   size: number,
   seed = `${Date.now()}`,
+  sortBasis = 'ledger order',
 ): { selected: LedgerTransaction[]; meta: SelectionMeta } {
   const n = transactions.length
   if (size >= n) {
     return {
       selected: [...transactions],
-      meta: {
-        method: 'systematic',
+      meta: baseMeta('systematic', transactions, transactions, {
         seed,
         interval: 1,
         randomStart: 0,
-        sortBasis: 'ledger order',
-        timestamp: new Date().toISOString(),
-        toolVersion: TOOL_VERSION,
-      },
+        sortBasis,
+        patternWarning:
+          'Systematic selection of full population is 100% examination.',
+      }),
     }
   }
 
@@ -83,15 +97,14 @@ export function selectSystematic(
 
   return {
     selected,
-    meta: {
-      method: 'systematic',
+    meta: baseMeta('systematic', selected, transactions, {
       seed,
       interval: Number(interval.toFixed(4)),
       randomStart: start,
-      sortBasis: 'ledger order',
-      timestamp: new Date().toISOString(),
-      toolVersion: TOOL_VERSION,
-    },
+      sortBasis,
+      patternWarning:
+        'Systematic selection may follow a periodicity pattern. Review for pattern risk.',
+    }),
   }
 }
 
@@ -99,39 +112,53 @@ export function selectBlock(
   transactions: LedgerTransaction[],
   size: number,
   startIndex: number,
+  rationale: string,
 ): { selected: LedgerTransaction[]; meta: SelectionMeta } {
   const n = transactions.length
-  const start = Math.max(0, Math.min(startIndex, Math.max(0, n - size)))
-  const selected = transactions.slice(start, start + size)
+  const maxStart = Math.max(0, n - size)
+  if (startIndex < 0 || startIndex > maxStart) {
+    throw new Error(
+      `Block start must be between 0 and ${maxStart} so the full block of ${size} fits.`,
+    )
+  }
+  const selected = transactions.slice(startIndex, startIndex + size)
   return {
     selected,
-    meta: {
-      method: 'block',
-      blockStart: start,
-      rationale: 'Continuous block selected by auditor.',
-      timestamp: new Date().toISOString(),
-      toolVersion: TOOL_VERSION,
-    },
+    meta: baseMeta('block', selected, transactions, {
+      blockStart: startIndex,
+      rationale,
+      patternWarning:
+        'Block selection may not represent the full population. Rationale required.',
+    }),
   }
 }
 
 export function selectHaphazard(
   transactions: LedgerTransaction[],
   ids: string[],
+  biasConfirmed: boolean,
 ): { selected: LedgerTransaction[]; meta: SelectionMeta } {
+  if (!biasConfirmed) {
+    throw new Error('Auditor must confirm selection without conscious bias.')
+  }
+  const unique = [...new Set(ids)]
+  if (unique.length !== ids.length) {
+    throw new Error('Duplicate selections are not allowed.')
+  }
   const map = new Map(transactions.map((t) => [t.id, t]))
-  const selected = ids
+  const selected = unique
     .map((id) => map.get(id))
     .filter((t): t is LedgerTransaction => Boolean(t))
 
+  if (selected.length !== unique.length) {
+    throw new Error('One or more selected rows are not in the active population.')
+  }
+
   return {
     selected,
-    meta: {
-      method: 'haphazard',
+    meta: baseMeta('haphazard', selected, transactions, {
       biasConfirmed: true,
-      timestamp: new Date().toISOString(),
-      toolVersion: TOOL_VERSION,
-    },
+    }),
   }
 }
 

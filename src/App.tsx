@@ -312,7 +312,6 @@ export default function App() {
     const idx = STEPS.indexOf(fromStep)
     const mappingIdx = STEPS.indexOf('mapping')
     const planningIdx = STEPS.indexOf('planning')
-    const designIdx = STEPS.indexOf('design')
     const selectionIdx = STEPS.indexOf('selection')
     const testingIdx = STEPS.indexOf('testing')
 
@@ -998,231 +997,6 @@ export default function App() {
           </section>
         )}
 
-        {step === 'clean' && (
-          <section className="card">
-            <div className="stat-grid">
-              <div>
-                <span>Original rows</span>
-                <strong>{summary.originalCount}</strong>
-              </div>
-              <div>
-                <span>Cleaned population</span>
-                <strong>{summary.cleanedCount}</strong>
-              </div>
-              <div>
-                <span>Excluded</span>
-                <strong>{summary.excludedCount}</strong>
-              </div>
-              <div>
-                <span>Cleaned value</span>
-                <strong>{formatMoney(summary.cleanedValue)}</strong>
-              </div>
-            </div>
-
-            <div className="stat-grid">
-              <div>
-                <span>Flagged totals</span>
-                <strong>{summary.flaggedTotals}</strong>
-              </div>
-              <div>
-                <span>Opening / closing</span>
-                <strong>{summary.flaggedOpeningClosing}</strong>
-              </div>
-              <div>
-                <span>Zero / negative</span>
-                <strong>{summary.flaggedZeroNegative}</strong>
-              </div>
-              <div>
-                <span>Duplicates (not auto-excluded)</span>
-                <strong>{summary.flaggedDuplicates}</strong>
-              </div>
-            </div>
-
-            <p className="lead-inline">
-              Resolve debit+credit conflicts. Flags are informational — duplicates are
-              not auto-excluded. Exclude with a recorded reason when appropriate.
-            </p>
-
-            {unresolvedCount > 0 && (
-              <div className="banner error">
-                {unresolvedCount} row(s) have both Debit and Credit values. Resolve each
-                row below before continuing.
-              </div>
-            )}
-            {activePop.length === 0 && (
-              <div className="banner error">
-                No active transactions remain. Restore or fix rows before continuing.
-              </div>
-            )}
-
-            {(flaggedTotals.length > 0 ||
-              flaggedOpening.length > 0 ||
-              flaggedZeroNeg.length > 0 ||
-              flaggedDuplicates.length > 0) && (
-              <div className="banner warn">
-                Review flagged rows: {flaggedTotals.length} total(s),{' '}
-                {flaggedOpening.length} opening/closing, {flaggedZeroNeg.length}{' '}
-                zero/negative, {flaggedDuplicates.length} duplicate voucher(s).
-              </div>
-            )}
-
-            {summary.byReason.length > 0 && (
-              <>
-                <h3>Exclusion summary</h3>
-                <div className="preview-table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Reason</th>
-                        <th>Count</th>
-                        <th>Value</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {summary.byReason.map((row) => (
-                        <tr key={row.reason}>
-                          <td>{row.reason}</td>
-                          <td>{row.count}</td>
-                          <td>{formatMoney(row.value)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-
-            <div className="preview-table-wrap preview-table-all">
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Date</th>
-                    <th>Account</th>
-                    <th>Voucher</th>
-                    <th>Description</th>
-                    <th>Debit</th>
-                    <th>Credit</th>
-                    <th>Coverage</th>
-                    <th>Flags</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {transactions.map((t) => (
-                    <tr key={t.id} className={t.excluded ? 'excluded-row' : ''}>
-                      <td>{t.id}</td>
-                      <td>{t.date || '—'}</td>
-                      <td>{t.accountNo || '—'}</td>
-                      <td>{t.voucherNo || '—'}</td>
-                      <td>{t.description || '—'}</td>
-                      <td>{formatMoney(t.debit)}</td>
-                      <td>{formatMoney(t.credit)}</td>
-                      <td>{formatMoney(t.coverageAmount)}</td>
-                      <td>
-                        {[
-                          t.looksLikeTotal ? 'total' : '',
-                          t.looksLikeOpeningClosing ? 'open/close' : '',
-                          t.isZeroOrNegative ? 'zero/neg' : '',
-                          t.isDuplicateVoucher ? 'duplicate' : '',
-                          t.bothSidesWarning ? 'both sides' : '',
-                        ]
-                          .filter(Boolean)
-                          .join(', ') || '—'}
-                      </td>
-                      <td>
-                        {t.needsCoverageResolution
-                          ? 'Needs resolution'
-                          : t.excluded
-                            ? `Excluded: ${t.exclusionReason || 'no reason recorded'}`
-                            : 'Active'}
-                      </td>
-                      <td>
-                        {t.needsCoverageResolution ? (
-                          <div className="row-actions">
-                            <button
-                              type="button"
-                              className="small-btn"
-                              onClick={() => resolveRow(t.id, 'useDebit')}
-                            >
-                              Use Debit
-                            </button>
-                            <button
-                              type="button"
-                              className="small-btn"
-                              onClick={() => resolveRow(t.id, 'useCredit')}
-                            >
-                              Use Credit
-                            </button>
-                            <button
-                              type="button"
-                              className="small-btn"
-                              onClick={() => resolveRow(t.id, 'useMax')}
-                            >
-                              Use Higher
-                            </button>
-                            <button
-                              type="button"
-                              className="small-btn"
-                              onClick={() => resolveRow(t.id, 'exclude')}
-                            >
-                              Exclude
-                            </button>
-                          </div>
-                        ) : t.excluded ? (
-                          <button
-                            type="button"
-                            className="small-btn"
-                            onClick={() => restoreRow(t.id)}
-                          >
-                            Restore
-                          </button>
-                        ) : (
-                          <div className="row-actions">
-                            <input
-                              className="exclude-input"
-                              placeholder="Reason to exclude"
-                              value={excludeDrafts[t.id] ?? ''}
-                              onChange={(e) =>
-                                setExcludeDrafts((prev) => ({
-                                  ...prev,
-                                  [t.id]: e.target.value,
-                                }))
-                              }
-                            />
-                            <button
-                              type="button"
-                              className="small-btn"
-                              onClick={() => excludeRow(t.id)}
-                            >
-                              Exclude
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="actions">
-              <button type="button" className="ghost" onClick={goBack}>
-                Back
-              </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={continueFromClean}
-                disabled={unresolvedCount > 0 || activePop.length === 0}
-              >
-                Continue to planning
-              </button>
-            </div>
-          </section>
-        )}
-
         {step === 'planning' && (
           <section className="card">
             <p className="lead-inline">
@@ -1423,249 +1197,12 @@ export default function App() {
           </section>
         )}
 
-        {step === 'highValue' && (
-          <section className="card">
-            <p className="lead-inline">
-              Separate high-value items for specific testing (not sampling). Residual
-              items remain eligible for sample selection.
-            </p>
-
-            <div className="form-grid grid-3">
-              <div>
-                <label htmlFor="hvThreshold">High-value threshold</label>
-                <input
-                  id="hvThreshold"
-                  type="number"
-                  min={0}
-                  value={designInputs.highValueThreshold}
-                  onChange={(e) => {
-                    invalidateFrom('highValue')
-                    setDesignInputs((prev) => ({
-                      ...prev,
-                      highValueThreshold: Number(e.target.value),
-                    }))
-                  }}
-                />
-              </div>
-            </div>
-
-            <label htmlFor="hvBasis">High-value basis</label>
-            <textarea
-              id="hvBasis"
-              rows={2}
-              value={designInputs.highValueBasis}
-              onChange={(e) => {
-                invalidateFrom('highValue')
-                setDesignInputs((prev) => ({
-                  ...prev,
-                  highValueBasis: e.target.value,
-                }))
-              }}
-            />
-
-            <div className="stat-grid">
-              <div>
-                <span>High-value items</span>
-                <strong>{liveHvSplit.highValue.length}</strong>
-              </div>
-              <div>
-                <span>High-value coverage</span>
-                <strong>
-                  {formatMoney(totalCoverageValue(liveHvSplit.highValue))}
-                </strong>
-              </div>
-              <div>
-                <span>Residual count</span>
-                <strong>{liveHvSplit.residual.length}</strong>
-              </div>
-              <div>
-                <span>Residual value</span>
-                <strong>
-                  {formatMoney(totalCoverageValue(liveHvSplit.residual))}
-                </strong>
-              </div>
-            </div>
-
-            {liveHvSplit.residual.length === 0 && liveHvSplit.highValue.length > 0 && (
-              <div className="banner warn">
-                Residual is empty — continuing means 100% specific-item testing (no
-                sampling).
-              </div>
-            )}
-
-            <h3>High-value list (specific testing)</h3>
-            <div className="preview-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Date</th>
-                    <th>Voucher</th>
-                    <th>Description</th>
-                    <th>Coverage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {liveHvSplit.highValue.length === 0 ? (
-                    <tr>
-                      <td colSpan={5}>No high-value items at this threshold.</td>
-                    </tr>
-                  ) : (
-                    liveHvSplit.highValue.map((t) => (
-                      <tr key={t.id}>
-                        <td>{t.id}</td>
-                        <td>{t.date || '—'}</td>
-                        <td>{t.voucherNo || t.accountNo || '—'}</td>
-                        <td>{t.description || '—'}</td>
-                        <td>{formatMoney(t.coverageAmount)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="actions">
-              <button type="button" className="ghost" onClick={goBack}>
-                Back
-              </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={continueFromHighValue}
-                disabled={
-                  liveHvSplit.highValue.length === 0 &&
-                  liveHvSplit.residual.length === 0
-                }
-              >
-                Continue
-              </button>
-            </div>
-          </section>
-        )}
-
-        {step === 'stratify' && (
-          <section className="card">
-            <div className="banner warn">
-              Stratification is population <strong>design</strong>, not a sampling
-              method. It organises the residual before method/size decisions.
-            </div>
-
-            <div className="form-grid grid-3">
-              <div>
-                <label htmlFor="strataBasis">Stratification basis</label>
-                <select
-                  id="strataBasis"
-                  value={designInputs.stratificationBasis}
-                  onChange={(e) => {
-                    invalidateFrom('stratify')
-                    const basis = e.target.value as StratificationBasis
-                    setDesignInputs((prev) => ({
-                      ...prev,
-                      stratificationBasis: basis,
-                    }))
-                    const source =
-                      residualItems.length > 0
-                        ? residualItems
-                        : liveHvSplit.residual
-                    setResidualItems(
-                      applyStratumKeys(
-                        source,
-                        basis,
-                        designInputs.stratificationOther || undefined,
-                      ),
-                    )
-                  }}
-                >
-                  <option value="none">None</option>
-                  <option value="value">Value bands</option>
-                  <option value="account">Account</option>
-                  <option value="vendor">Vendor</option>
-                  <option value="date">Date (YYYY-MM)</option>
-                  <option value="other">Other (extra column)</option>
-                </select>
-              </div>
-              {designInputs.stratificationBasis === 'other' && (
-                <div>
-                  <label htmlFor="strataOther">Extra column key</label>
-                  <input
-                    id="strataOther"
-                    value={designInputs.stratificationOther}
-                    onChange={(e) => {
-                      invalidateFrom('stratify')
-                      const other = e.target.value
-                      setDesignInputs((prev) => ({
-                        ...prev,
-                        stratificationOther: other,
-                      }))
-                      const source =
-                        residualItems.length > 0
-                          ? residualItems
-                          : liveHvSplit.residual
-                      setResidualItems(
-                        applyStratumKeys(source, 'other', other || undefined),
-                      )
-                    }}
-                    placeholder="e.g. Vendor"
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="stat-grid">
-              <div>
-                <span>Residual items</span>
-                <strong>{residualForDesign.length}</strong>
-              </div>
-              <div>
-                <span>Strata</span>
-                <strong>{strataRows.length}</strong>
-              </div>
-            </div>
-
-            <h3>Stratum summary</h3>
-            <div className="preview-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Stratum</th>
-                    <th>Count</th>
-                    <th>Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {strataRows.map((row) => (
-                    <tr key={row.key}>
-                      <td>{row.key}</td>
-                      <td>{row.count}</td>
-                      <td>{formatMoney(row.value)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="actions">
-              <button type="button" className="ghost" onClick={goBack}>
-                Back
-              </button>
-              <button type="button" className="primary" onClick={continueFromStratify}>
-                Continue to design
-              </button>
-            </div>
-          </section>
-        )}
-
         {step === 'design' && (
           <section className="card">
             <div className="stat-grid">
               <div>
-                <span>Residual count</span>
-                <strong>{residualForDesign.length}</strong>
-              </div>
-              <div>
-                <span>High-value (specific)</span>
-                <strong>{hvForDesign.length}</strong>
+                <span>Population count</span>
+                <strong>{activePop.length}</strong>
               </div>
               <div>
                 <span>Risk level</span>
@@ -1677,185 +1214,176 @@ export default function App() {
               </div>
             </div>
 
-            {residualForDesign.length === 0 ? (
-              <div className="banner warn">
-                No residual population — sampling design is not applicable. Continue to
-                document specific testing of high-value items only.
-              </div>
-            ) : (
+            <h3>Recommended method</h3>
+            <p className="lead-inline">
+              <strong>{methodLabel(methodRecommendation.recommended)}</strong>
+            </p>
+            <ul>
+              {methodRecommendation.reasons.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+
+            <label htmlFor="selectedMethod">Selected method</label>
+            <select
+              id="selectedMethod"
+              value={sampleDesign.selectedMethod}
+              onChange={(e) =>
+                updateDesignMethod(e.target.value as SelectionMethod)
+              }
+            >
+              <option value="random">Random</option>
+              <option value="systematic">Systematic</option>
+              <option value="haphazard">Haphazard / Manual</option>
+              <option value="block">Block</option>
+            </select>
+
+            {sampleDesign.selectedMethod !== sampleDesign.recommendedMethod && (
               <>
-                <h3>Recommended method</h3>
-                <p className="lead-inline">
-                  <strong>{methodLabel(methodRecommendation.recommended)}</strong>
-                </p>
-                <ul>
-                  {methodRecommendation.reasons.map((r) => (
-                    <li key={r}>{r}</li>
-                  ))}
-                </ul>
-
-                <label htmlFor="selectedMethod">Selected method</label>
-                <select
-                  id="selectedMethod"
-                  value={sampleDesign.selectedMethod}
-                  onChange={(e) =>
-                    updateDesignMethod(e.target.value as SelectionMethod)
-                  }
-                >
-                  <option value="random">Random</option>
-                  <option value="systematic">Systematic</option>
-                  <option value="haphazard">Haphazard / Manual</option>
-                  <option value="block">Block</option>
-                </select>
-
-                {sampleDesign.selectedMethod !== sampleDesign.recommendedMethod && (
-                  <>
-                    <label htmlFor="methodOverride">Method override reason</label>
-                    <textarea
-                      id="methodOverride"
-                      rows={2}
-                      value={sampleDesign.methodOverrideReason}
-                      onChange={(e) => {
-                        invalidateFrom('design')
-                        setSampleDesign((prev) => ({
-                          ...prev,
-                          methodOverrideReason: e.target.value,
-                        }))
-                      }}
-                    />
-                  </>
-                )}
-
-                <label className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={sampleDesign.methodApproved}
-                    onChange={(e) => {
-                      invalidateFrom('design')
-                      setSampleDesign((prev) => ({
-                        ...prev,
-                        methodApproved: e.target.checked,
-                      }))
-                    }}
-                  />
-                  <span>I approve the selected selection method for this engagement.</span>
-                </label>
-
-                <h3>Sample size</h3>
-                <p className="lead-inline">{sizeSuggestion.ruleLabel}</p>
-
-                {smallHighRiskBand && (
-                  <>
-                    <label htmlFor="coveragePct">
-                      Coverage % (small pop, high risk:{' '}
-                      {Math.round(SMALL_POP_HIGH_RISK_MIN_PCT * 100)}–
-                      {Math.round(SMALL_POP_HIGH_RISK_MAX_PCT * 100)}%)
-                    </label>
-                    <input
-                      id="coveragePct"
-                      type="range"
-                      min={Math.round(SMALL_POP_HIGH_RISK_MIN_PCT * 100)}
-                      max={Math.round(SMALL_POP_HIGH_RISK_MAX_PCT * 100)}
-                      step={1}
-                      value={Math.round(coveragePercentOverride * 100)}
-                      onChange={(e) => {
-                        invalidateFrom('design')
-                        const pct = Number(e.target.value) / 100
-                        setCoveragePercentOverride(pct)
-                        const next = suggestResidualSampleSize({
-                          residualCount: residualForDesign.length,
-                          riskLevel: designInputs.riskLevel,
-                          coveragePercentOverride: pct,
-                        })
-                        setSampleDesign((prev) => ({
-                          ...prev,
-                          suggestedSize: next.suggestedSize,
-                          confirmedSize: next.suggestedSize,
-                          coveragePercentUsed: next.coveragePercent,
-                        }))
-                      }}
-                    />
-                    <p className="hint">
-                      {Math.round(coveragePercentOverride * 100)}% of residual
-                    </p>
-                  </>
-                )}
-
-                <label htmlFor="confirmedSize">Confirmed residual sample size</label>
-                <input
-                  id="confirmedSize"
-                  type="number"
-                  min={1}
-                  max={Math.max(1, residualForDesign.length)}
-                  value={sampleDesign.confirmedSize}
-                  onChange={(e) => {
-                    invalidateFrom('design')
-                    setSampleDesign((prev) => ({
-                      ...prev,
-                      confirmedSize: Number(e.target.value),
-                    }))
-                    setSizeWarning('')
-                  }}
-                />
-
-                <label htmlFor="sizeRationale">Size rationale</label>
+                <label htmlFor="methodOverride">Method override reason</label>
                 <textarea
-                  id="sizeRationale"
-                  rows={3}
-                  value={sampleDesign.sizeRationale}
+                  id="methodOverride"
+                  rows={2}
+                  value={sampleDesign.methodOverrideReason}
                   onChange={(e) => {
                     invalidateFrom('design')
                     setSampleDesign((prev) => ({
                       ...prev,
-                      sizeRationale: e.target.value,
+                      methodOverrideReason: e.target.value,
                     }))
                   }}
                 />
-
-                {sampleDesign.confirmedSize < sizeSuggestion.suggestedSize && (
-                  <label className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={sampleDesign.sizeReviewerApproved}
-                      onChange={(e) => {
-                        invalidateFrom('design')
-                        setSampleDesign((prev) => ({
-                          ...prev,
-                          sizeReviewerApproved: e.target.checked,
-                        }))
-                      }}
-                    />
-                    <span>
-                      Reviewer approves reduction below suggested residual coverage (
-                      {sizeSuggestion.suggestedSize}).
-                    </span>
-                  </label>
-                )}
-
-                {sizeWarning && <div className="banner warn">{sizeWarning}</div>}
-                {sizeSuggestion.isHundredPercent && (
-                  <div className="banner warn">
-                    Confirmed size equals the full residual — this is 100% examination of
-                    residual, not sample-based testing.
-                  </div>
-                )}
-
-                <label className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={sampleDesign.samplingRiskAccepted}
-                    onChange={(e) => {
-                      invalidateFrom('design')
-                      setSampleDesign((prev) => ({
-                        ...prev,
-                        samplingRiskAccepted: e.target.checked,
-                      }))
-                    }}
-                  />
-                  <span>{SAMPLING_RISK_STATEMENT}</span>
-                </label>
               </>
             )}
+
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={sampleDesign.methodApproved}
+                onChange={(e) => {
+                  invalidateFrom('design')
+                  setSampleDesign((prev) => ({
+                    ...prev,
+                    methodApproved: e.target.checked,
+                  }))
+                }}
+              />
+              <span>I approve the selected selection method for this engagement.</span>
+            </label>
+
+            <h3>Sample size</h3>
+            <p className="lead-inline">{sizeSuggestion.ruleLabel}</p>
+
+            {smallHighRiskBand && (
+              <>
+                <label htmlFor="coveragePct">
+                  Coverage % (small pop, high risk:{' '}
+                  {Math.round(SMALL_POP_HIGH_RISK_MIN_PCT * 100)}–
+                  {Math.round(SMALL_POP_HIGH_RISK_MAX_PCT * 100)}%)
+                </label>
+                <input
+                  id="coveragePct"
+                  type="range"
+                  min={Math.round(SMALL_POP_HIGH_RISK_MIN_PCT * 100)}
+                  max={Math.round(SMALL_POP_HIGH_RISK_MAX_PCT * 100)}
+                  step={1}
+                  value={Math.round(coveragePercentOverride * 100)}
+                  onChange={(e) => {
+                    invalidateFrom('design')
+                    const pct = Number(e.target.value) / 100
+                    setCoveragePercentOverride(pct)
+                    const next = suggestResidualSampleSize({
+                      residualCount: activePop.length,
+                      riskLevel: designInputs.riskLevel,
+                      coveragePercentOverride: pct,
+                    })
+                    setSampleDesign((prev) => ({
+                      ...prev,
+                      suggestedSize: next.suggestedSize,
+                      confirmedSize: next.suggestedSize,
+                      coveragePercentUsed: next.coveragePercent,
+                    }))
+                  }}
+                />
+                <p className="hint">
+                  {Math.round(coveragePercentOverride * 100)}% of population
+                </p>
+              </>
+            )}
+
+            <label htmlFor="confirmedSize">Confirmed sample size</label>
+            <input
+              id="confirmedSize"
+              type="number"
+              min={1}
+              max={Math.max(1, activePop.length)}
+              value={sampleDesign.confirmedSize}
+              onChange={(e) => {
+                invalidateFrom('design')
+                setSampleDesign((prev) => ({
+                  ...prev,
+                  confirmedSize: Number(e.target.value),
+                }))
+                setSizeWarning('')
+              }}
+            />
+
+            <label htmlFor="sizeRationale">Size rationale</label>
+            <textarea
+              id="sizeRationale"
+              rows={3}
+              value={sampleDesign.sizeRationale}
+              onChange={(e) => {
+                invalidateFrom('design')
+                setSampleDesign((prev) => ({
+                  ...prev,
+                  sizeRationale: e.target.value,
+                }))
+              }}
+            />
+
+            {sampleDesign.confirmedSize < sizeSuggestion.suggestedSize && (
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={sampleDesign.sizeReviewerApproved}
+                  onChange={(e) => {
+                    invalidateFrom('design')
+                    setSampleDesign((prev) => ({
+                      ...prev,
+                      sizeReviewerApproved: e.target.checked,
+                    }))
+                  }}
+                />
+                <span>
+                  Reviewer approves reduction below suggested population coverage (
+                  {sizeSuggestion.suggestedSize}).
+                </span>
+              </label>
+            )}
+
+            {sizeWarning && <div className="banner warn">{sizeWarning}</div>}
+            {sizeSuggestion.isHundredPercent && (
+              <div className="banner warn">
+                Confirmed size equals the full population — this is 100% examination,
+                not sample-based testing.
+              </div>
+            )}
+
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={sampleDesign.samplingRiskAccepted}
+                onChange={(e) => {
+                  invalidateFrom('design')
+                  setSampleDesign((prev) => ({
+                    ...prev,
+                    samplingRiskAccepted: e.target.checked,
+                  }))
+                }}
+              />
+              <span>{SAMPLING_RISK_STATEMENT}</span>
+            </label>
 
             <div className="actions">
               <button type="button" className="ghost" onClick={goBack}>
@@ -1871,14 +1399,13 @@ export default function App() {
         {step === 'selection' && (
           <section className="card">
             <p className="lead-inline">
-              Selection runs on the <strong>residual</strong> population only. High-value
-              items are listed separately for specific testing (not in the sample).
+              Selection runs on the active <strong>population</strong>.
             </p>
 
             <div className="stat-grid">
               <div>
-                <span>Residual</span>
-                <strong>{residualForDesign.length}</strong>
+                <span>Population</span>
+                <strong>{activePop.length}</strong>
               </div>
               <div>
                 <span>Sample size</span>
@@ -1888,123 +1415,78 @@ export default function App() {
                 <span>Method</span>
                 <strong>{methodLabel(sampleDesign.selectedMethod)}</strong>
               </div>
-              <div>
-                <span>HV specific items</span>
-                <strong>{hvForDesign.length}</strong>
-              </div>
             </div>
 
-            {hvForDesign.length > 0 && (
+            {sampleDesign.selectedMethod === 'systematic' && (
+              <div className="banner warn">
+                Systematic selection may follow a periodicity pattern. Review for
+                pattern risk.
+              </div>
+            )}
+
+            {sampleDesign.selectedMethod === 'block' && (
               <>
-                <h3>High-value — specific testing (not sampled)</h3>
-                <div className="preview-table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>Voucher</th>
-                        <th>Coverage</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {hvForDesign.map((t) => (
-                        <tr key={`hv-sel-${t.id}`}>
-                          <td>{t.id}</td>
-                          <td>{t.voucherNo || t.accountNo || '—'}</td>
-                          <td>{formatMoney(t.coverageAmount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <label htmlFor="blockStart">
+                  Block start index (0-based in population list)
+                </label>
+                <input
+                  id="blockStart"
+                  type="number"
+                  min={0}
+                  max={Math.max(0, activePop.length - sampleDesign.confirmedSize)}
+                  value={blockStart}
+                  onChange={(e) => {
+                    invalidateFrom('selection')
+                    setBlockStart(Number(e.target.value))
+                  }}
+                />
+                <label htmlFor="blockRationale">Rationale for block selection</label>
+                <textarea
+                  id="blockRationale"
+                  rows={2}
+                  value={blockRationale}
+                  onChange={(e) => {
+                    invalidateFrom('selection')
+                    setBlockRationale(e.target.value)
+                  }}
+                />
               </>
             )}
 
-            {residualForDesign.length === 0 ? (
-              <div className="banner warn">
-                No residual items to sample. Continue to record specific testing of
-                high-value items.
-              </div>
-            ) : (
+            {sampleDesign.selectedMethod === 'haphazard' && (
               <>
-                {sampleDesign.selectedMethod === 'systematic' && (
-                  <div className="banner warn">
-                    Systematic selection may follow a periodicity pattern. Review for
-                    pattern risk.
-                  </div>
-                )}
-
-                {sampleDesign.selectedMethod === 'block' && (
-                  <>
-                    <label htmlFor="blockStart">
-                      Block start index (0-based in residual list)
-                    </label>
-                    <input
-                      id="blockStart"
-                      type="number"
-                      min={0}
-                      max={Math.max(
-                        0,
-                        residualForDesign.length - sampleDesign.confirmedSize,
-                      )}
-                      value={blockStart}
-                      onChange={(e) => {
-                        invalidateFrom('selection')
-                        setBlockStart(Number(e.target.value))
-                      }}
-                    />
-                    <label htmlFor="blockRationale">Rationale for block selection</label>
-                    <textarea
-                      id="blockRationale"
-                      rows={2}
-                      value={blockRationale}
-                      onChange={(e) => {
-                        invalidateFrom('selection')
-                        setBlockRationale(e.target.value)
-                      }}
-                    />
-                  </>
-                )}
-
-                {sampleDesign.selectedMethod === 'haphazard' && (
-                  <>
-                    <label className="check-row">
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={haphazardBiasConfirmed}
+                    onChange={(e) => {
+                      invalidateFrom('selection')
+                      setHaphazardBiasConfirmed(e.target.checked)
+                    }}
+                  />
+                  <span>
+                    I confirm this selection was made without conscious bias.
+                  </span>
+                </label>
+                <p className="lead-inline">
+                  Select exactly {sampleDesign.confirmedSize} population items (
+                  {haphazardIds.length} selected).
+                </p>
+                <div className="pick-list">
+                  {activePop.map((t) => (
+                    <label key={t.id} className="pick-item">
                       <input
                         type="checkbox"
-                        checked={haphazardBiasConfirmed}
-                        onChange={(e) => {
-                          invalidateFrom('selection')
-                          setHaphazardBiasConfirmed(e.target.checked)
-                        }}
+                        checked={haphazardIds.includes(t.id)}
+                        onChange={() => toggleHaphazard(t.id)}
                       />
                       <span>
-                        I confirm this selection was made without conscious bias.
+                        {t.id} · {t.voucherNo || t.accountNo || 'No ref'} ·{' '}
+                        {formatMoney(t.coverageAmount)}
                       </span>
                     </label>
-                    <p className="lead-inline">
-                      Select exactly {sampleDesign.confirmedSize} residual items (
-                      {haphazardIds.length} selected).
-                    </p>
-                    <div className="pick-list">
-                      {residualForDesign.map((t) => (
-                        <label key={t.id} className="pick-item">
-                          <input
-                            type="checkbox"
-                            checked={haphazardIds.includes(t.id)}
-                            onChange={() => toggleHaphazard(t.id)}
-                          />
-                          <span>
-                            {t.id} · {t.voucherNo || t.accountNo || 'No ref'} ·{' '}
-                            {formatMoney(t.coverageAmount)}
-                            {t.stratumKey && t.stratumKey !== 'all'
-                              ? ` · ${t.stratumKey}`
-                              : ''}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </>
-                )}
+                  ))}
+                </div>
               </>
             )}
 
@@ -2013,9 +1495,7 @@ export default function App() {
                 Back
               </button>
               <button type="button" className="primary" onClick={runSelection}>
-                {residualForDesign.length === 0
-                  ? 'Continue without sample'
-                  : `Select ${sampleDesign.confirmedSize} residual items`}
+                Select {sampleDesign.confirmedSize} items
               </button>
             </div>
           </section>
@@ -2033,18 +1513,14 @@ export default function App() {
                 <strong>{formatMoney(selectedCoverage)}</strong>
               </div>
               <div>
-                <span>HV specific items</span>
-                <strong>{hvForDesign.length}</strong>
-              </div>
-              <div>
-                <span>HV coverage</span>
-                <strong>{formatMoney(hvCoverage)}</strong>
+                <span>Population</span>
+                <strong>{activePop.length}</strong>
               </div>
             </div>
 
-            <h3>Residual sample testing</h3>
+            <h3>Sample testing</h3>
             {selected.length === 0 ? (
-              <p className="lead-inline">No residual sample items selected.</p>
+              <p className="lead-inline">No sample items selected.</p>
             ) : (
               <div className="preview-table-wrap preview-table-all">
                 <table>
@@ -2120,38 +1596,6 @@ export default function App() {
                 </table>
               </div>
             )}
-
-            <h3>High-value — specific testing (separately)</h3>
-            <div className="preview-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Date</th>
-                    <th>Voucher</th>
-                    <th>Description</th>
-                    <th>Coverage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {hvForDesign.length === 0 ? (
-                    <tr>
-                      <td colSpan={5}>No high-value specific-testing items.</td>
-                    </tr>
-                  ) : (
-                    hvForDesign.map((t) => (
-                      <tr key={`hv-test-${t.id}`}>
-                        <td>{t.id}</td>
-                        <td>{t.date || '—'}</td>
-                        <td>{t.voucherNo || t.accountNo || '—'}</td>
-                        <td>{t.description || '—'}</td>
-                        <td>{formatMoney(t.coverageAmount)}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
 
             <label htmlFor="natureSummary">Nature of exceptions summary</label>
             <textarea
@@ -2308,30 +1752,6 @@ export default function App() {
               </ul>
             )}
 
-            <h3>High-value treatment</h3>
-            <p>
-              Threshold {formatMoney(designInputs.highValueThreshold)}. Basis:{' '}
-              {designInputs.highValueBasis}. Specific testing items:{' '}
-              {hvForDesign.length} ({formatMoney(hvCoverage)}). Residual:{' '}
-              {residualForDesign.length} ({formatMoney(residualCoverage)}).
-            </p>
-
-            <h3>Stratification summary (population design)</h3>
-            <p>
-              Basis: {designInputs.stratificationBasis}
-              {designInputs.stratificationBasis === 'other'
-                ? ` (${designInputs.stratificationOther || 'n/a'})`
-                : ''}
-              . Stratification is not a sampling method.
-            </p>
-            <ul>
-              {strataRows.map((r) => (
-                <li key={`wp-stratum-${r.key}`}>
-                  {r.key}: {r.count} ({formatMoney(r.value)})
-                </li>
-              ))}
-            </ul>
-
             <h3>Sampling risk</h3>
             <p>{SAMPLING_RISK_STATEMENT}</p>
             <p>
@@ -2391,7 +1811,7 @@ export default function App() {
               <p>No selection meta recorded.</p>
             )}
 
-            <h3>Selected residual sample items</h3>
+            <h3>Selected sample items</h3>
             <div className="preview-table-wrap">
               <table>
                 <thead>
@@ -2401,14 +1821,13 @@ export default function App() {
                     <th>Voucher</th>
                     <th>Description</th>
                     <th>Coverage</th>
-                    <th>Stratum</th>
                     <th>Exception</th>
                   </tr>
                 </thead>
                 <tbody>
                   {selected.length === 0 ? (
                     <tr>
-                      <td colSpan={7}>None (no residual sample).</td>
+                      <td colSpan={6}>None.</td>
                     </tr>
                   ) : (
                     selected.map((t) => {
@@ -2420,7 +1839,6 @@ export default function App() {
                           <td>{t.voucherNo || '—'}</td>
                           <td>{t.description || '—'}</td>
                           <td>{formatMoney(t.coverageAmount)}</td>
-                          <td>{t.stratumKey || 'all'}</td>
                           <td>
                             {row?.exception
                               ? `Yes (${formatMoney(row.exceptionValue)}) ${row.nature}`
@@ -2429,38 +1847,6 @@ export default function App() {
                         </tr>
                       )
                     })
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <h3>High-value list (specific testing)</h3>
-            <div className="preview-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Date</th>
-                    <th>Voucher</th>
-                    <th>Description</th>
-                    <th>Coverage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {hvForDesign.length === 0 ? (
-                    <tr>
-                      <td colSpan={5}>None.</td>
-                    </tr>
-                  ) : (
-                    hvForDesign.map((t) => (
-                      <tr key={`wp-hv-${t.id}`}>
-                        <td>{t.id}</td>
-                        <td>{t.date || '—'}</td>
-                        <td>{t.voucherNo || '—'}</td>
-                        <td>{t.description || '—'}</td>
-                        <td>{formatMoney(t.coverageAmount)}</td>
-                      </tr>
-                    ))
                   )}
                 </tbody>
               </table>

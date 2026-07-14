@@ -2,11 +2,10 @@
  * Implementation audit vs updated project brief (source of truth).
  *
  * IMPLEMENTED:
- * - Upload → worksheet → headers/mapping → clean → reconcile → planning
+ * - Upload → worksheet → headers/mapping → clean → planning
  *   → high-value → stratify → design (method/size/risk) → selection → testing → WP
  * - Flexible header mapping + positional fallback
  * - Population cleaning flags (totals, opening/closing, zero/negative, duplicates)
- * - Reconciliation with explanation + reviewer approval on difference
  * - Full planning fields (test type, assertion, objective, unit, error definition)
  * - High-value separation before residual sampling
  * - Stratification as design only

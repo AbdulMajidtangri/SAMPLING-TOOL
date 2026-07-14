@@ -52,7 +52,6 @@ import type {
   LedgerTransaction,
   MappingConfidence,
   PopulationSummary,
-  ReconciliationState,
   RiskLevel,
   SampleDesignState,
   SelectionMeta,
@@ -77,7 +76,6 @@ const STEPS: WizardStep[] = [
   'worksheet',
   'mapping',
   'clean',
-  'reconcile',
   'planning',
   'highValue',
   'stratify',
@@ -92,7 +90,6 @@ const STEP_TITLES: Record<WizardStep, string> = {
   worksheet: 'Choose worksheet',
   mapping: 'Headers & column mapping',
   clean: 'Clean population',
-  reconcile: 'Reconcile population',
   planning: 'Planning inputs',
   highValue: 'High-value separation',
   stratify: 'Stratification (design)',
@@ -148,17 +145,6 @@ function defaultDesignInputs(): DesignInputs {
     riskLevel: 'high',
     expectedError: '',
     tolerableError: '',
-  }
-}
-
-function defaultReconciliation(): ReconciliationState {
-  return {
-    controlTotal: 0,
-    controlSource: '',
-    difference: 0,
-    explanation: '',
-    reconciled: false,
-    reviewerApproved: false,
   }
 }
 
@@ -239,9 +225,6 @@ export default function App() {
     null,
   )
 
-  const [reconciliation, setReconciliation] =
-    useState<ReconciliationState>(defaultReconciliation())
-
   const [engagement, setEngagement] = useState<EngagementMeta>(defaultEngagement())
   const [designInputs, setDesignInputs] = useState<DesignInputs>(defaultDesignInputs())
 
@@ -280,7 +263,6 @@ export default function App() {
   }, [sheet, headerRow])
 
   const activePop = useMemo(() => activeTransactions(transactions), [transactions])
-  const cleanedValue = useMemo(() => totalCoverageValue(transactions), [transactions])
   const unresolvedCount = useMemo(
     () => unresolvedBothSides(transactions),
     [transactions],
@@ -340,11 +322,6 @@ export default function App() {
     })
   }, [residualForDesign.length, designInputs.riskLevel, coveragePercentOverride])
 
-  const reconcileDifference = useMemo(
-    () => cleanedValue - reconciliation.controlTotal,
-    [cleanedValue, reconciliation.controlTotal],
-  )
-
   const mappingWarnings = useMemo(
     () => (sheet ? validateRequiredMappings(mapping) : []),
     [mapping, sheet],
@@ -383,7 +360,6 @@ export default function App() {
   function invalidateFrom(fromStep: WizardStep) {
     const idx = STEPS.indexOf(fromStep)
     const cleanIdx = STEPS.indexOf('clean')
-    const reconcileIdx = STEPS.indexOf('reconcile')
     const planningIdx = STEPS.indexOf('planning')
     const highValueIdx = STEPS.indexOf('highValue')
     const stratifyIdx = STEPS.indexOf('stratify')
@@ -397,11 +373,7 @@ export default function App() {
       setPopulationSummary(null)
     }
     if (idx <= cleanIdx) {
-      setReconciliation(defaultReconciliation())
       setPopulationSummary(null)
-    }
-    if (idx < reconcileIdx) {
-      setReconciliation(defaultReconciliation())
     }
     if (idx < planningIdx) {
       // engagement kept editable but downstream design cleared below
@@ -607,55 +579,6 @@ export default function App() {
     }
     const summary = buildPopulationSummary(transactions)
     setPopulationSummary(summary)
-    setReconciliation((prev) => ({
-      ...prev,
-      difference: summary.cleanedValue - prev.controlTotal,
-      reconciled: false,
-    }))
-    setError('')
-    setStep('reconcile')
-  }
-
-  function updateReconciliation<K extends keyof ReconciliationState>(
-    key: K,
-    value: ReconciliationState[K],
-  ) {
-    invalidateFrom('reconcile')
-    setReconciliation((prev) => {
-      const next = { ...prev, [key]: value }
-      const difference = cleanedValue - (key === 'controlTotal' ? Number(value) : next.controlTotal)
-      next.difference = difference
-      const absDiff = Math.abs(difference)
-      next.reconciled =
-        absDiff <= 0.01 ||
-        (Boolean(next.explanation.trim()) && next.reviewerApproved)
-      return next
-    })
-  }
-
-  function continueFromReconcile() {
-    const difference = cleanedValue - reconciliation.controlTotal
-    const absDiff = Math.abs(difference)
-    if (absDiff > 0.01 && !reconciliation.explanation.trim()) {
-      setError(
-        'Population does not reconcile to the control total. Record an explanation (hard stop).',
-      )
-      return
-    }
-    if (absDiff > 0.01 && !reconciliation.reviewerApproved) {
-      setError(
-        'Difference exceeds tolerance. Reviewer approval is required before continuing.',
-      )
-      return
-    }
-    const reconciled =
-      absDiff <= 0.01 ||
-      (Boolean(reconciliation.explanation.trim()) && reconciliation.reviewerApproved)
-    setReconciliation((prev) => ({
-      ...prev,
-      difference,
-      reconciled,
-    }))
     setError('')
     setStep('planning')
   }
@@ -995,7 +918,6 @@ export default function App() {
     setTransactions([])
     setExcludeDrafts({})
     setPopulationSummary(null)
-    setReconciliation(defaultReconciliation())
     setEngagement(defaultEngagement())
     setDesignInputs(defaultDesignInputs())
     setHighValueItems([])
@@ -1490,95 +1412,6 @@ export default function App() {
                 onClick={continueFromClean}
                 disabled={unresolvedCount > 0 || activePop.length === 0}
               >
-                Continue to reconcile
-              </button>
-            </div>
-          </section>
-        )}
-
-        {step === 'reconcile' && (
-          <section className="card">
-            <div className="stat-grid">
-              <div>
-                <span>Cleaned value</span>
-                <strong>{formatMoney(cleanedValue)}</strong>
-              </div>
-              <div>
-                <span>Control total</span>
-                <strong>{formatMoney(reconciliation.controlTotal)}</strong>
-              </div>
-              <div>
-                <span>Difference</span>
-                <strong>{formatMoney(reconcileDifference)}</strong>
-              </div>
-              <div>
-                <span>Status</span>
-                <strong>
-                  {Math.abs(reconcileDifference) <= 0.01
-                    ? 'Reconciles'
-                    : 'Difference'}
-                </strong>
-              </div>
-            </div>
-
-            <div className="form-grid grid-3">
-              <div>
-                <label htmlFor="controlTotal">Control total</label>
-                <input
-                  id="controlTotal"
-                  type="number"
-                  value={reconciliation.controlTotal}
-                  onChange={(e) =>
-                    updateReconciliation('controlTotal', Number(e.target.value))
-                  }
-                />
-              </div>
-              <div>
-                <label htmlFor="controlSource">Control source</label>
-                <input
-                  id="controlSource"
-                  value={reconciliation.controlSource}
-                  onChange={(e) =>
-                    updateReconciliation('controlSource', e.target.value)
-                  }
-                  placeholder="e.g. Trial balance / GL control"
-                />
-              </div>
-            </div>
-
-            {Math.abs(reconcileDifference) > 0.01 && (
-              <>
-                <div className="banner warn">
-                  Difference of {formatMoney(reconcileDifference)} exceeds tolerance
-                  (0.01). Explanation and reviewer approval are required.
-                </div>
-                <label htmlFor="reconExplain">Explanation</label>
-                <textarea
-                  id="reconExplain"
-                  rows={3}
-                  value={reconciliation.explanation}
-                  onChange={(e) =>
-                    updateReconciliation('explanation', e.target.value)
-                  }
-                />
-                <label className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={reconciliation.reviewerApproved}
-                    onChange={(e) =>
-                      updateReconciliation('reviewerApproved', e.target.checked)
-                    }
-                  />
-                  <span>Reviewer approves proceeding with this difference.</span>
-                </label>
-              </>
-            )}
-
-            <div className="actions">
-              <button type="button" className="ghost" onClick={goBack}>
-                Back
-              </button>
-              <button type="button" className="primary" onClick={continueFromReconcile}>
                 Continue to planning
               </button>
             </div>
@@ -2669,18 +2502,6 @@ export default function App() {
                 ))}
               </ul>
             )}
-
-            <h3>Reconciliation summary</h3>
-            <p>
-              Control total {formatMoney(reconciliation.controlTotal)} from{' '}
-              {reconciliation.controlSource || '(source not recorded)'}. Difference{' '}
-              {formatMoney(reconciliation.difference)}. Reconciled:{' '}
-              {reconciliation.reconciled ? 'Yes' : 'No'}
-              {reconciliation.explanation
-                ? `. Explanation: ${reconciliation.explanation}`
-                : ''}
-              {reconciliation.reviewerApproved ? ' (reviewer approved).' : '.'}
-            </p>
 
             <h3>High-value treatment</h3>
             <p>

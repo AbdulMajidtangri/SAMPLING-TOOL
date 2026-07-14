@@ -3,7 +3,6 @@ export type WizardStep =
   | 'worksheet'
   | 'mapping'
   | 'clean'
-  | 'reconcile'
   | 'planning'
   | 'highValue'
   | 'stratify'
@@ -109,15 +108,6 @@ export interface PopulationSummary {
   flaggedZeroNegative: number
   flaggedDuplicates: number
   flaggedBlanksSkipped: number
-}
-
-export interface ReconciliationState {
-  controlTotal: number
-  controlSource: string
-  difference: number
-  explanation: string
-  reconciled: boolean
-  reviewerApproved: boolean
 }
 
 export interface EngagementMeta {

@@ -21,14 +21,13 @@ npm test
 2. Choose worksheet  
 3. Headers & column mapping (suggest / confirm; flexible client headers)  
 4. Clean population (flag totals, opening/closing, zeros/negatives, duplicates; exclude with reason)  
-5. Reconcile to control total (explanation + reviewer if difference)  
-6. Planning inputs (objective, assertion, test type, sampling unit, error definition, …)  
-7. Separate high-value items for specific testing  
-8. Stratification as population **design** (not a method)  
-9. Method recommendation + approval/override, residual sample size rationale, sampling-risk acknowledgement  
-10. Generate sample on **residual** population only  
-11. Testing results  
-12. Working paper (sign-off, lock, amendment control tied to file-assembly deadline)
+5. Planning inputs (objective, assertion, test type, sampling unit, error definition, …)  
+6. Separate high-value items for specific testing  
+7. Stratification as population **design** (not a method)  
+8. Method recommendation + approval/override, residual sample size rationale, sampling-risk acknowledgement  
+9. Generate sample on **residual** population only  
+10. Testing results  
+11. Working paper (sign-off, lock, amendment control tied to file-assembly deadline)
 
 ## Sample size guidance
 

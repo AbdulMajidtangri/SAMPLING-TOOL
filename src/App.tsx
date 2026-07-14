@@ -16,7 +16,8 @@ import {
 import {
   formatMoney,
   riskLevelLabel,
-  suggestResidualSampleSize,
+  scoreLabel,
+  suggestSampleSizeForPath,
   validateSampleSizeOverride,
 } from './lib/sampleSize'
 import {
@@ -50,6 +51,7 @@ import type {
   MappingConfidence,
   PopulationSummary,
   RiskLevel,
+  RiskScore,
   SampleDesignState,
   SelectionMeta,
   SelectionMethod,
@@ -99,6 +101,21 @@ function confidenceClass(confidence: MappingConfidence): string {
   return `confidence ${confidence}`
 }
 
+function riskScoreToLevel(score: RiskScore): RiskLevel {
+  switch (score) {
+    case 1:
+      return 'low'
+    case 2:
+      return 'medium'
+    case 3:
+      return 'high'
+    case 4:
+      return 'veryHigh'
+  }
+}
+
+const RISK_SCORE_OPTIONS: RiskScore[] = [1, 2, 3, 4]
+
 function emptyMapping(): Record<StandardField, FieldMappingState> {
   const result = {} as Record<StandardField, FieldMappingState>
   for (const field of MAPPING_FIELD_ORDER) {
@@ -135,6 +152,8 @@ function defaultDesignInputs(): DesignInputs {
     riskLevel: 'high',
     expectedError: '',
     tolerableError: '',
+    sampleSizePath: 'pathA',
+    pathA: { riskLevel: 3, expectedError: 2, otherEvidence: 2 },
   }
 }
 
@@ -152,6 +171,7 @@ function defaultSampleDesign(
     coveragePercentUsed: null,
     samplingRiskAccepted: false,
     sizeReviewerApproved: false,
+    sizeRuleLabel: '',
   }
 }
 
@@ -260,23 +280,37 @@ export default function App() {
     () =>
       recommendMethod({
         residual: activePop,
-        riskLevel: designInputs.riskLevel,
+        riskLevel:
+          designInputs.sampleSizePath === 'pathA'
+            ? riskScoreToLevel(designInputs.pathA.riskLevel)
+            : designInputs.riskLevel,
         highValueCount: 0,
       }),
-    [activePop, designInputs.riskLevel],
+    [
+      activePop,
+      designInputs.sampleSizePath,
+      designInputs.pathA.riskLevel,
+      designInputs.riskLevel,
+    ],
   )
 
   const sizeSuggestion = useMemo(() => {
-    const residualCount = activePop.length
     const allowBand =
-      residualCount <= 30 &&
-      (designInputs.riskLevel === 'high' || designInputs.riskLevel === 'veryHigh')
-    return suggestResidualSampleSize({
-      residualCount,
-      riskLevel: designInputs.riskLevel,
+      designInputs.sampleSizePath === 'pathA' &&
+      activePop.length <= 30 &&
+      designInputs.pathA.riskLevel >= 3
+    return suggestSampleSizeForPath({
+      path: designInputs.sampleSizePath,
+      pathA: designInputs.pathA,
+      transactions: activePop,
       coveragePercentOverride: allowBand ? coveragePercentOverride : null,
     })
-  }, [activePop.length, designInputs.riskLevel, coveragePercentOverride])
+  }, [
+    activePop,
+    designInputs.sampleSizePath,
+    designInputs.pathA,
+    coveragePercentOverride,
+  ])
 
   const mappingWarnings = useMemo(
     () => (sheet ? validateRequiredMappings(mapping) : []),
@@ -291,8 +325,9 @@ export default function App() {
 
   const stepIndex = STEPS.indexOf(step)
   const smallHighRiskBand =
+    designInputs.sampleSizePath === 'pathA' &&
     activePop.length <= 30 &&
-    (designInputs.riskLevel === 'high' || designInputs.riskLevel === 'veryHigh')
+    designInputs.pathA.riskLevel >= 3
 
   function goNext() {
     const next = STEPS[stepIndex + 1]
@@ -484,19 +519,24 @@ export default function App() {
       return
     }
 
+    const riskForMethod =
+      designInputs.sampleSizePath === 'pathA'
+        ? riskScoreToLevel(designInputs.pathA.riskLevel)
+        : designInputs.riskLevel
     const recommendation = recommendMethod({
       residual: pop,
-      riskLevel: designInputs.riskLevel,
+      riskLevel: riskForMethod,
       highValueCount: 0,
     })
-    const suggestion = suggestResidualSampleSize({
-      residualCount: pop.length,
-      riskLevel: designInputs.riskLevel,
-      coveragePercentOverride:
-        pop.length <= 30 &&
-        (designInputs.riskLevel === 'high' || designInputs.riskLevel === 'veryHigh')
-          ? coveragePercentOverride
-          : null,
+    const allowBand =
+      designInputs.sampleSizePath === 'pathA' &&
+      pop.length <= 30 &&
+      designInputs.pathA.riskLevel >= 3
+    const suggestion = suggestSampleSizeForPath({
+      path: designInputs.sampleSizePath,
+      pathA: designInputs.pathA,
+      transactions: pop,
+      coveragePercentOverride: allowBand ? coveragePercentOverride : null,
     })
     setSampleDesign({
       ...defaultSampleDesign(recommendation.recommended),
@@ -505,6 +545,7 @@ export default function App() {
       suggestedSize: suggestion.suggestedSize,
       confirmedSize: suggestion.suggestedSize,
       coveragePercentUsed: suggestion.coveragePercent,
+      sizeRuleLabel: suggestion.ruleLabel,
       sizeRationale: DEFAULT_SIZE_RATIONALE,
     })
     setError('')
@@ -567,6 +608,7 @@ export default function App() {
       ...prev,
       suggestedSize: suggestion.suggestedSize,
       coveragePercentUsed: suggestion.coveragePercent,
+      sizeRuleLabel: suggestion.ruleLabel,
     }))
 
     setError('')
@@ -1136,28 +1178,120 @@ export default function App() {
               placeholder="Define what constitutes an exception / misstatement"
             />
 
-            <div className="form-grid grid-3">
-              <div>
-                <label htmlFor="riskLevel">Risk level</label>
-                <select
-                  id="riskLevel"
-                  value={designInputs.riskLevel}
-                  onChange={(e) => {
+            <h3>Sample size path</h3>
+            <div className="path-chooser" role="radiogroup" aria-label="Sample size path">
+              <label className="check-row">
+                <input
+                  type="radio"
+                  name="sampleSizePath"
+                  checked={designInputs.sampleSizePath === 'pathA'}
+                  onChange={() => {
                     invalidateFrom('planning')
                     setDesignInputs((prev) => ({
                       ...prev,
-                      riskLevel: e.target.value as RiskLevel,
+                      sampleSizePath: 'pathA',
+                      riskLevel: riskScoreToLevel(prev.pathA.riskLevel),
                     }))
                   }}
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="veryHigh">Very high</option>
-                </select>
+                />
+                <span>
+                  Path A — Risk matrix (risk, expected error, other evidence)
+                </span>
+              </label>
+              <label className="check-row">
+                <input
+                  type="radio"
+                  name="sampleSizePath"
+                  checked={designInputs.sampleSizePath === 'pathB'}
+                  onChange={() => {
+                    invalidateFrom('planning')
+                    setDesignInputs((prev) => ({
+                      ...prev,
+                      sampleSizePath: 'pathB',
+                    }))
+                  }}
+                />
+                <span>Path B — Value coverage (monetary tier guidance)</span>
+              </label>
+            </div>
+
+            {designInputs.sampleSizePath === 'pathA' ? (
+              <div className="form-grid grid-3">
+                <div>
+                  <label htmlFor="pathARisk">Risk level</label>
+                  <select
+                    id="pathARisk"
+                    value={designInputs.pathA.riskLevel}
+                    onChange={(e) => {
+                      invalidateFrom('planning')
+                      const score = Number(e.target.value) as RiskScore
+                      setDesignInputs((prev) => ({
+                        ...prev,
+                        pathA: { ...prev.pathA, riskLevel: score },
+                        riskLevel: riskScoreToLevel(score),
+                      }))
+                    }}
+                  >
+                    {RISK_SCORE_OPTIONS.map((score) => (
+                      <option key={score} value={score}>
+                        {score} — {scoreLabel(score, 'riskLevel')}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="pathAExpected">Expected error</label>
+                  <select
+                    id="pathAExpected"
+                    value={designInputs.pathA.expectedError}
+                    onChange={(e) => {
+                      invalidateFrom('planning')
+                      const score = Number(e.target.value) as RiskScore
+                      setDesignInputs((prev) => ({
+                        ...prev,
+                        pathA: { ...prev.pathA, expectedError: score },
+                      }))
+                    }}
+                  >
+                    {RISK_SCORE_OPTIONS.map((score) => (
+                      <option key={score} value={score}>
+                        {score} — {scoreLabel(score, 'expectedError')}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="pathAEvidence">Other evidence</label>
+                  <select
+                    id="pathAEvidence"
+                    value={designInputs.pathA.otherEvidence}
+                    onChange={(e) => {
+                      invalidateFrom('planning')
+                      const score = Number(e.target.value) as RiskScore
+                      setDesignInputs((prev) => ({
+                        ...prev,
+                        pathA: { ...prev.pathA, otherEvidence: score },
+                      }))
+                    }}
+                  >
+                    {RISK_SCORE_OPTIONS.map((score) => (
+                      <option key={score} value={score}>
+                        {score} — {scoreLabel(score, 'otherEvidence')}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
+            ) : (
+              <p className="hint">
+                Suggested size will be based on population value coverage tiers after
+                you continue.
+              </p>
+            )}
+
+            <div className="form-grid grid-2">
               <div>
-                <label htmlFor="expectedError">Expected error (optional)</label>
+                <label htmlFor="expectedError">Expected error note (optional)</label>
                 <input
                   id="expectedError"
                   value={designInputs.expectedError}
@@ -1205,8 +1339,12 @@ export default function App() {
                 <strong>{activePop.length}</strong>
               </div>
               <div>
-                <span>Risk level</span>
-                <strong>{riskLevelLabel(designInputs.riskLevel)}</strong>
+                <span>Sample size path</span>
+                <strong>
+                  {designInputs.sampleSizePath === 'pathA'
+                    ? 'Path A — Risk matrix'
+                    : 'Path B — Value coverage'}
+                </strong>
               </div>
               <div>
                 <span>Suggested size</span>
@@ -1272,7 +1410,32 @@ export default function App() {
             </label>
 
             <h3>Sample size</h3>
-            <p className="lead-inline">{sizeSuggestion.ruleLabel}</p>
+            <p className="lead-inline">
+              {sampleDesign.sizeRuleLabel || sizeSuggestion.ruleLabel}
+            </p>
+
+            {designInputs.sampleSizePath === 'pathA' && sizeSuggestion.pathADetail && (
+              <p className="hint">
+                Path A scores: risk {designInputs.pathA.riskLevel} (
+                {scoreLabel(designInputs.pathA.riskLevel, 'riskLevel')}), expected
+                error {designInputs.pathA.expectedError} (
+                {scoreLabel(designInputs.pathA.expectedError, 'expectedError')}),
+                other evidence {designInputs.pathA.otherEvidence} (
+                {scoreLabel(designInputs.pathA.otherEvidence, 'otherEvidence')}).
+                Matrix score {sizeSuggestion.pathADetail.score} → matrix size{' '}
+                {sizeSuggestion.pathADetail.matrixSize}.
+              </p>
+            )}
+
+            {designInputs.sampleSizePath === 'pathB' && sizeSuggestion.pathBDetail && (
+              <p className="hint">
+                Path B tier {sizeSuggestion.pathBDetail.tier}:{' '}
+                {Math.round(sizeSuggestion.pathBDetail.coveragePercent * 100)}%
+                coverage requires{' '}
+                {formatMoney(sizeSuggestion.pathBDetail.requiredCoverageValue)} (
+                provisional {sizeSuggestion.pathBDetail.suggestedSampleSize} items).
+              </p>
+            )}
 
             {smallHighRiskBand && (
               <>
@@ -1292,9 +1455,10 @@ export default function App() {
                     invalidateFrom('design')
                     const pct = Number(e.target.value) / 100
                     setCoveragePercentOverride(pct)
-                    const next = suggestResidualSampleSize({
-                      residualCount: activePop.length,
-                      riskLevel: designInputs.riskLevel,
+                    const next = suggestSampleSizeForPath({
+                      path: 'pathA',
+                      pathA: designInputs.pathA,
+                      transactions: activePop,
                       coveragePercentOverride: pct,
                     })
                     setSampleDesign((prev) => ({
@@ -1302,6 +1466,7 @@ export default function App() {
                       suggestedSize: next.suggestedSize,
                       confirmedSize: next.suggestedSize,
                       coveragePercentUsed: next.coveragePercent,
+                      sizeRuleLabel: next.ruleLabel,
                     }))
                   }}
                 />
@@ -1363,7 +1528,9 @@ export default function App() {
             )}
 
             {sizeWarning && <div className="banner warn">{sizeWarning}</div>}
-            {sizeSuggestion.isHundredPercent && (
+            {(sizeSuggestion.pathADetail?.isHundredPercent ||
+              (activePop.length > 0 &&
+                sizeSuggestion.suggestedSize === activePop.length)) && (
               <div className="banner warn">
                 Confirmed size equals the full population — this is 100% examination,
                 not sample-based testing.
@@ -1717,7 +1884,32 @@ export default function App() {
               <br />
               <strong>Error definition:</strong> {engagement.errorDefinition || '—'}
               <br />
-              <strong>Risk level:</strong> {riskLevelLabel(designInputs.riskLevel)}
+              <strong>Sample size path:</strong>{' '}
+              {designInputs.sampleSizePath === 'pathA'
+                ? 'Path A — Risk matrix'
+                : 'Path B — Value coverage'}
+              <br />
+              {designInputs.sampleSizePath === 'pathA' ? (
+                <>
+                  <strong>Path A scores:</strong> risk{' '}
+                  {designInputs.pathA.riskLevel} (
+                  {scoreLabel(designInputs.pathA.riskLevel, 'riskLevel')}); expected
+                  error {designInputs.pathA.expectedError} (
+                  {scoreLabel(designInputs.pathA.expectedError, 'expectedError')});
+                  other evidence {designInputs.pathA.otherEvidence} (
+                  {scoreLabel(designInputs.pathA.otherEvidence, 'otherEvidence')})
+                  <br />
+                  <strong>Mapped risk level:</strong>{' '}
+                  {riskLevelLabel(designInputs.riskLevel)}
+                </>
+              ) : (
+                <>
+                  <strong>Path B:</strong>{' '}
+                  {sizeSuggestion.pathBDetail
+                    ? `Tier ${sizeSuggestion.pathBDetail.tier}; ${Math.round(sizeSuggestion.pathBDetail.coveragePercent * 100)}% coverage; required ${formatMoney(sizeSuggestion.pathBDetail.requiredCoverageValue)}`
+                    : 'Value coverage tier guidance'}
+                </>
+              )}
             </p>
 
             <h3>Population source</h3>
@@ -1760,6 +1952,9 @@ export default function App() {
 
             <h3>Sample size rationale</h3>
             <p>
+              <strong>Size rule:</strong>{' '}
+              {sampleDesign.sizeRuleLabel || sizeSuggestion.ruleLabel || '—'}
+              <br />
               Suggested {sampleDesign.suggestedSize}
               {sampleDesign.coveragePercentUsed != null
                 ? ` (${Math.round(sampleDesign.coveragePercentUsed * 100)}% coverage)`

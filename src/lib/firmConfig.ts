@@ -5,15 +5,40 @@ import {
   type RiskLevel,
 } from './types'
 
-/** Residual count at or below this uses small-population coverage guidance. */
+/** Residual / population count at or below this uses small-population coverage guidance. */
 export const SMALL_POPULATION_CUTOFF = 30
 
-/** High-risk small population: 60–70% of residual (default 60%). */
+/** High-risk small population: 60–70% (default 60%). */
 export const SMALL_POP_HIGH_RISK_MIN_PCT = 0.6
 export const SMALL_POP_HIGH_RISK_MAX_PCT = 0.7
 export const SMALL_POP_HIGH_RISK_DEFAULT_PCT = 0.6
 
-/** Large residual populations: default coverage % by risk (auditor may increase). */
+/** Path A — risk-score matrix (sum of risk + expected error + other evidence). */
+export const RISK_SCORE_MATRIX = [
+  { min: 3, max: 3, size: 15 },
+  { min: 4, max: 5, size: 25 },
+  { min: 6, max: 7, size: 40 },
+  { min: 8, max: 9, size: 60 },
+  { min: 10, max: 12, size: 70 },
+] as const
+
+/**
+ * Path B — monetary value-coverage tiers (firm guidance).
+ * Sample size is driven by value coverage; item selection is still a separate method.
+ */
+export const VALUE_COVERAGE_TIERS = [
+  { tier: 1, maxInclusive: 500_000, percent: 1, minimumRequired: 0 },
+  { tier: 2, maxInclusive: 2_000_000, percent: 0.6, minimumRequired: 500_000 },
+  { tier: 3, maxInclusive: 10_000_000, percent: 0.4, minimumRequired: 1_200_000 },
+  {
+    tier: 4,
+    maxInclusive: null as number | null,
+    percent: 0.25,
+    minimumRequired: 4_000_000,
+  },
+] as const
+
+/** Large populations: default count-coverage % by risk (used with Path A small-pop band). */
 export const LARGE_POP_COVERAGE_BY_RISK: Record<RiskLevel, number> = {
   low: 0.15,
   medium: 0.25,
@@ -21,8 +46,8 @@ export const LARGE_POP_COVERAGE_BY_RISK: Record<RiskLevel, number> = {
   veryHigh: 0.5,
 }
 
+export const DEFAULT_MIN_ITEM_COUNT = 15
 export const DEFAULT_HIGH_VALUE_THRESHOLD = 100_000
-
 export const HEADER_SYNONYMS_VERSION = '2.0.0'
 
 export const DEBIT_CREDIT_TREATMENT =
@@ -58,7 +83,6 @@ export const AUDIT_AREA_OPTIONS = [
   'Other',
 ]
 
-/** Days after period end used as default file-assembly lock deadline guidance. */
 export const FILE_ASSEMBLY_DEADLINE_DAYS = 60
 
 export function captureFirmConfigSnapshot(): FirmConfigSnapshot {
@@ -69,6 +93,14 @@ export function captureFirmConfigSnapshot(): FirmConfigSnapshot {
     smallPopHighRiskMinPct: SMALL_POP_HIGH_RISK_MIN_PCT,
     smallPopHighRiskMaxPct: SMALL_POP_HIGH_RISK_MAX_PCT,
     largePopCoverageByRisk: { ...LARGE_POP_COVERAGE_BY_RISK },
+    riskScoreMatrix: RISK_SCORE_MATRIX.map((r) => ({ ...r })),
+    valueCoverageTiers: VALUE_COVERAGE_TIERS.map((t) => ({
+      tier: t.tier,
+      maxInclusive: t.maxInclusive,
+      percent: t.percent,
+      minimumRequired: t.minimumRequired,
+    })),
+    minimumItemCount: DEFAULT_MIN_ITEM_COUNT,
     assertionOptions: [...ASSERTION_OPTIONS],
     testTypeOptions: [...TEST_TYPE_OPTIONS],
     auditAreaOptions: [...AUDIT_AREA_OPTIONS],

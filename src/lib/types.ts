@@ -21,7 +21,11 @@ export type MappingConfidence = 'high' | 'medium' | 'low' | 'none'
 
 export type SelectionMethod = 'random' | 'systematic' | 'haphazard' | 'block'
 
+export type SampleSizePath = 'pathA' | 'pathB'
+
 export type RiskLevel = 'low' | 'medium' | 'high' | 'veryHigh'
+
+export type RiskScore = 1 | 2 | 3 | 4
 
 export type CoverageResolution = 'useDebit' | 'useCredit' | 'useMax' | 'exclude'
 
@@ -127,6 +131,24 @@ export interface DesignInputs {
   riskLevel: RiskLevel
   expectedError: string
   tolerableError: string
+  sampleSizePath: SampleSizePath
+  pathA: PathAInputs
+}
+
+export interface PathAInputs {
+  riskLevel: RiskScore
+  expectedError: RiskScore
+  otherEvidence: RiskScore
+}
+
+export interface PathBResult {
+  tier: number
+  coveragePercent: number
+  minimumRequired: number
+  requiredCoverageValue: number
+  suggestedSampleSize: number
+  provisionalIds: string[]
+  provisionalCoverageValue: number
 }
 
 export interface MethodRecommendation {
@@ -145,6 +167,7 @@ export interface SampleDesignState {
   coveragePercentUsed: number | null
   samplingRiskAccepted: boolean
   sizeReviewerApproved: boolean
+  sizeRuleLabel: string
 }
 
 export interface SelectionMeta {
@@ -203,6 +226,14 @@ export interface FirmConfigSnapshot {
   smallPopHighRiskMinPct: number
   smallPopHighRiskMaxPct: number
   largePopCoverageByRisk: Record<RiskLevel, number>
+  riskScoreMatrix: Array<{ min: number; max: number; size: number }>
+  valueCoverageTiers: Array<{
+    tier: number
+    maxInclusive: number | null
+    percent: number
+    minimumRequired: number
+  }>
+  minimumItemCount: number
   assertionOptions: string[]
   testTypeOptions: string[]
   auditAreaOptions: string[]

@@ -523,60 +523,52 @@ export default function App() {
   }
 
   function continueFromDesign() {
-    const residual = residualForDesign
+    const pop = activePop
     const suggestion = sizeSuggestion
 
-    if (residual.length > 0) {
-      if (!sampleDesign.methodApproved) {
-        setError('Method must be approved before continuing (hard stop).')
-        return
-      }
-      if (
-        sampleDesign.selectedMethod !== sampleDesign.recommendedMethod &&
-        !sampleDesign.methodOverrideReason.trim()
-      ) {
-        setError(
-          'Record a reason for selecting a method different from the recommendation.',
-        )
-        return
-      }
-      if (!sampleDesign.samplingRiskAccepted) {
-        setError('Sampling risk statement must be accepted (hard stop).')
-        return
-      }
-      if (!sampleDesign.sizeRationale.trim()) {
-        setError('Sample-size rationale is required (hard stop).')
-        return
-      }
-
-      const validation = validateSampleSizeOverride({
-        proposed: sampleDesign.confirmedSize,
-        calculated: suggestion.suggestedSize,
-        population: residual.length,
-        rationale: sampleDesign.sizeRationale,
-        reviewerApproved: sampleDesign.sizeReviewerApproved,
-      })
-      if (!validation.ok) {
-        setError(validation.error ?? 'Invalid sample size.')
-        return
-      }
-      setSizeWarning(validation.warning ?? '')
-      setSampleDesign((prev) => ({
-        ...prev,
-        suggestedSize: suggestion.suggestedSize,
-        coveragePercentUsed: suggestion.coveragePercent,
-      }))
-    } else {
-      setSampleDesign((prev) => ({
-        ...prev,
-        suggestedSize: 0,
-        confirmedSize: 0,
-        coveragePercentUsed: 0,
-        methodApproved: true,
-        samplingRiskAccepted: true,
-      }))
-      setSizeWarning('')
+    if (pop.length === 0) {
+      setError('No active transactions remain for sampling.')
+      return
     }
+    if (!sampleDesign.methodApproved) {
+      setError('Method must be approved before continuing (hard stop).')
+      return
+    }
+    if (
+      sampleDesign.selectedMethod !== sampleDesign.recommendedMethod &&
+      !sampleDesign.methodOverrideReason.trim()
+    ) {
+      setError(
+        'Record a reason for selecting a method different from the recommendation.',
+      )
+      return
+    }
+    if (!sampleDesign.samplingRiskAccepted) {
+      setError('Sampling risk statement must be accepted (hard stop).')
+      return
+    }
+    if (!sampleDesign.sizeRationale.trim()) {
+      setError('Sample-size rationale is required (hard stop).')
+      return
+    }
+
+    const validation = validateSampleSizeOverride({
+      proposed: sampleDesign.confirmedSize,
+      calculated: suggestion.suggestedSize,
+      population: pop.length,
+      rationale: sampleDesign.sizeRationale,
+      reviewerApproved: sampleDesign.sizeReviewerApproved,
+    })
+    if (!validation.ok) {
+      setError(validation.error ?? 'Invalid sample size.')
+      return
+    }
+    setSizeWarning(validation.warning ?? '')
+    setSampleDesign((prev) => ({
+      ...prev,
+      suggestedSize: suggestion.suggestedSize,
+      coveragePercentUsed: suggestion.coveragePercent,
+    }))
 
     setError('')
     setStep('selection')
@@ -592,28 +584,17 @@ export default function App() {
   }
 
   function runSelection() {
-    const residual = residualForDesign
+    const pop = activePop
     const size = sampleDesign.confirmedSize
     const method = sampleDesign.selectedMethod
 
-    if (residual.length === 0) {
-      setSelected([])
-      setSelectionMeta({
-        method,
-        timestamp: new Date().toISOString(),
-        toolVersion: TOOL_VERSION,
-        dataHash: hashExtractedData(residual),
-        selectedIds: [],
-        rationale: 'No residual population — sampling not applied; HV specific testing only.',
-      })
-      setTesting([])
-      setError('')
-      setStep('testing')
+    if (pop.length === 0) {
+      setError('No active transactions remain for sampling.')
       return
     }
 
     if (size < 1) {
-      setError('Confirmed sample size must be at least 1 for the residual population.')
+      setError('Confirmed sample size must be at least 1 for the population.')
       return
     }
     if (
@@ -633,7 +614,7 @@ export default function App() {
         return
       }
       if (haphazardIds.length !== size) {
-        setError(`Please select exactly ${size} residual transactions.`)
+        setError(`Please select exactly ${size} population transactions.`)
         return
       }
     }
@@ -641,13 +622,13 @@ export default function App() {
     let outcome: { selected: LedgerTransaction[]; meta: SelectionMeta }
     try {
       if (method === 'random') {
-        outcome = selectRandom(residual, size)
+        outcome = selectRandom(pop, size)
       } else if (method === 'systematic') {
-        outcome = selectSystematic(residual, size)
+        outcome = selectSystematic(pop, size)
       } else if (method === 'block') {
-        outcome = selectBlock(residual, size, blockStart, blockRationale)
+        outcome = selectBlock(pop, size, blockStart, blockRationale)
       } else {
-        outcome = selectHaphazard(residual, haphazardIds, haphazardBiasConfirmed)
+        outcome = selectHaphazard(pop, haphazardIds, haphazardBiasConfirmed)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Selection failed.')
@@ -747,12 +728,9 @@ export default function App() {
     setDataEnd(1)
     setMapping(emptyMapping())
     setTransactions([])
-    setExcludeDrafts({})
     setPopulationSummary(null)
     setEngagement(defaultEngagement())
     setDesignInputs(defaultDesignInputs())
-    setHighValueItems([])
-    setResidualItems([])
     setSampleDesign(defaultSampleDesign())
     setCoveragePercentOverride(SMALL_POP_HIGH_RISK_DEFAULT_PCT)
     setSizeWarning('')
@@ -769,10 +747,6 @@ export default function App() {
   }
 
   const summary = populationSummary ?? liveSummary
-  const flaggedDuplicates = transactions.filter((t) => t.isDuplicateVoucher)
-  const flaggedTotals = transactions.filter((t) => t.looksLikeTotal)
-  const flaggedOpening = transactions.filter((t) => t.looksLikeOpeningClosing)
-  const flaggedZeroNeg = transactions.filter((t) => t.isZeroOrNegative)
 
   return (
     <div className="app-shell">

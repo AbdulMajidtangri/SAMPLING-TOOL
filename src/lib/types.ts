@@ -2,9 +2,12 @@ export type WizardStep =
   | 'upload'
   | 'worksheet'
   | 'mapping'
-  | 'confirm'
-  | 'objective'
-  | 'sampleSize'
+  | 'clean'
+  | 'reconcile'
+  | 'planning'
+  | 'highValue'
+  | 'stratify'
+  | 'design'
   | 'selection'
   | 'testing'
   | 'workingPaper'
@@ -20,13 +23,21 @@ export type StandardField =
 
 export type MappingConfidence = 'high' | 'medium' | 'low' | 'none'
 
-export type SampleSizePath = 'pathA' | 'pathB'
-
 export type SelectionMethod = 'random' | 'systematic' | 'haphazard' | 'block'
 
-export type RiskScore = 1 | 2 | 3 | 4
+export type RiskLevel = 'low' | 'medium' | 'high' | 'veryHigh'
 
 export type CoverageResolution = 'useDebit' | 'useCredit' | 'useMax' | 'exclude'
+
+export type ReviewStatus = 'draft' | 'prepared' | 'reviewed' | 'locked'
+
+export type StratificationBasis =
+  | 'none'
+  | 'value'
+  | 'account'
+  | 'vendor'
+  | 'date'
+  | 'other'
 
 export interface WorkbookSheet {
   name: string
@@ -35,6 +46,7 @@ export interface WorkbookSheet {
 
 export interface UploadedLedger {
   fileName: string
+  fileHash: string
   sheets: WorkbookSheet[]
 }
 
@@ -67,26 +79,85 @@ export interface LedgerTransaction {
   needsCoverageResolution: boolean
   isRepeatedHeader: boolean
   looksLikeTotal: boolean
+  looksLikeOpeningClosing: boolean
+  isZeroOrNegative: boolean
+  isDuplicateVoucher: boolean
   excluded: boolean
   exclusionReason: string
   coverageResolution?: CoverageResolution
+  highValue: boolean
+  stratumKey: string
   extras: Record<string, string>
 }
 
-export interface PathAInputs {
-  riskLevel: RiskScore
-  expectedError: RiskScore
-  otherEvidence: RiskScore
+export interface ExclusionSummaryRow {
+  reason: string
+  count: number
+  value: number
 }
 
-export interface PathBResult {
-  tier: number
-  coveragePercent: number
-  minimumRequired: number
-  requiredCoverageValue: number
-  suggestedSampleSize: number
-  provisionalIds: string[]
-  provisionalCoverageValue: number
+export interface PopulationSummary {
+  originalCount: number
+  originalValue: number
+  cleanedCount: number
+  cleanedValue: number
+  excludedCount: number
+  excludedValue: number
+  byReason: ExclusionSummaryRow[]
+  flaggedTotals: number
+  flaggedOpeningClosing: number
+  flaggedZeroNegative: number
+  flaggedDuplicates: number
+  flaggedBlanksSkipped: number
+}
+
+export interface ReconciliationState {
+  controlTotal: number
+  controlSource: string
+  difference: number
+  explanation: string
+  reconciled: boolean
+  reviewerApproved: boolean
+}
+
+export interface EngagementMeta {
+  wpReference: string
+  clientName: string
+  auditArea: string
+  period: string
+  testType: string
+  assertion: string
+  objective: string
+  samplingUnit: string
+  errorDefinition: string
+}
+
+export interface DesignInputs {
+  highValueThreshold: number
+  highValueBasis: string
+  stratificationBasis: StratificationBasis
+  stratificationOther: string
+  riskLevel: RiskLevel
+  expectedError: string
+  tolerableError: string
+}
+
+export interface MethodRecommendation {
+  recommended: SelectionMethod
+  reasons: string[]
+}
+
+export interface SampleDesignState {
+  recommendedMethod: SelectionMethod
+  selectedMethod: SelectionMethod
+  methodOverrideReason: string
+  methodApproved: boolean
+  suggestedSize: number
+  confirmedSize: number
+  sizeRationale: string
+  coveragePercentUsed: number | null
+  samplingRiskAccepted: boolean
+  sizeReviewerApproved: boolean
 }
 
 export interface SelectionMeta {
@@ -123,29 +194,36 @@ export interface EvaluationState {
   furtherTesting: 'yes' | 'no'
   conclusion: string
   reviewerComments: string
-  untestedRemainderBasis: string
+}
+
+export interface SignOffState {
+  preparedBy: string
+  preparedDate: string
+  reviewedBy: string
+  reviewedDate: string
+  reviewStatus: ReviewStatus
+  locked: boolean
+  lockDate: string
+  fileAssemblyDeadline: string
+  amendmentNote: string
+  amendmentReviewerApproved: boolean
 }
 
 export interface FirmConfigSnapshot {
   toolVersion: string
-  riskScoreMatrix: Array<{ min: number; max: number; size: number }>
-  valueCoverageTiers: Array<{
-    tier: number
-    maxInclusive: number | null
-    percent: number
-    minimumRequired: number
-  }>
-  minimumItemCount: number
+  highValueDefaultThreshold: number
+  smallPopulationCutoff: number
+  smallPopHighRiskMinPct: number
+  smallPopHighRiskMaxPct: number
+  largePopCoverageByRisk: Record<RiskLevel, number>
+  assertionOptions: string[]
+  testTypeOptions: string[]
+  auditAreaOptions: string[]
   headerSynonymsVersion: string
   debitCreditTreatment: string
+  samplingRiskStatement: string
+  fileAssemblyDeadlineDays: number
   capturedAt: string
-}
-
-export interface EngagementMeta {
-  wpReference: string
-  clientName: string
-  auditArea: string
-  period: string
 }
 
 export const STANDARD_FIELD_LABELS: Record<StandardField, string> = {
@@ -158,10 +236,6 @@ export const STANDARD_FIELD_LABELS: Record<StandardField, string> = {
   amount: 'Amount (alt. if no Debit/Credit)',
 }
 
-/**
- * UI + auto-suggest processing order.
- * Core ledger columns first, then optional alternatives.
- */
 export const MAPPING_FIELD_ORDER: StandardField[] = [
   'date',
   'voucherNo',
@@ -172,10 +246,6 @@ export const MAPPING_FIELD_ORDER: StandardField[] = [
   'amount',
 ]
 
-/**
- * Left-to-right positional fallback when a column is still unmapped
- * (e.g. generic headers). Matches the usual ledger layout.
- */
 export const POSITIONAL_FIELD_ORDER: StandardField[] = [
   'date',
   'voucherNo',
@@ -184,7 +254,6 @@ export const POSITIONAL_FIELD_ORDER: StandardField[] = [
   'credit',
 ]
 
-/** Brief-required core fields (Account No / Amount are allowed alternatives). */
 export const CORE_REQUIRED_FIELDS: StandardField[] = [
   'date',
   'voucherNo',
@@ -193,4 +262,7 @@ export const CORE_REQUIRED_FIELDS: StandardField[] = [
   'credit',
 ]
 
-export const TOOL_VERSION = '1.1.0'
+export const TOOL_VERSION = '2.0.0'
+
+export const SAMPLING_RISK_STATEMENT =
+  'Because a non-statistical sample is used, sampling risk is addressed through professional judgment, population design, sample size rationale, and review approval — not statistical confidence measurement.'

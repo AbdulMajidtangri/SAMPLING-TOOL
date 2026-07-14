@@ -15,11 +15,9 @@ import {
   validateRequiredMappings,
 } from './lib/headers'
 import {
-  DEFAULT_MIN_ITEM_COUNT,
   formatMoney,
-  pathASampleSize,
-  pathBSizing,
-  scoreLabel,
+  riskLevelLabel,
+  suggestResidualSampleSize,
   validateSampleSizeOverride,
 } from './lib/sampleSize'
 import {
@@ -29,37 +27,61 @@ import {
   selectRandom,
   selectSystematic,
 } from './lib/selection'
-import { captureFirmConfigSnapshot } from './lib/firmConfig'
+import {
+  ASSERTION_OPTIONS,
+  AUDIT_AREA_OPTIONS,
+  DEFAULT_HIGH_VALUE_THRESHOLD,
+  FILE_ASSEMBLY_DEADLINE_DAYS,
+  SMALL_POP_HIGH_RISK_DEFAULT_PCT,
+  SMALL_POP_HIGH_RISK_MAX_PCT,
+  SMALL_POP_HIGH_RISK_MIN_PCT,
+  TEST_TYPE_OPTIONS,
+  captureFirmConfigSnapshot,
+} from './lib/firmConfig'
+import { applyStratumKeys, separateHighValue, stratumSummary } from './lib/highValue'
+import { recommendMethod } from './lib/methodRecommend'
+import { buildPopulationSummary } from './lib/populationSummary'
 import { hashExtractedData } from './lib/hash'
 import type {
   CoverageResolution,
+  DesignInputs,
   EngagementMeta,
   EvaluationState,
   FieldMappingState,
   FirmConfigSnapshot,
   LedgerTransaction,
   MappingConfidence,
-  PathAInputs,
-  PathBResult,
-  RiskScore,
-  SampleSizePath,
+  PopulationSummary,
+  ReconciliationState,
+  RiskLevel,
+  SampleDesignState,
   SelectionMeta,
   SelectionMethod,
+  SignOffState,
   StandardField,
+  StratificationBasis,
   TestingResult,
   UploadedLedger,
   WizardStep,
 } from './lib/types'
-import { MAPPING_FIELD_ORDER, STANDARD_FIELD_LABELS, TOOL_VERSION } from './lib/types'
+import {
+  MAPPING_FIELD_ORDER,
+  SAMPLING_RISK_STATEMENT,
+  STANDARD_FIELD_LABELS,
+  TOOL_VERSION,
+} from './lib/types'
 import './App.css'
 
 const STEPS: WizardStep[] = [
   'upload',
   'worksheet',
   'mapping',
-  'confirm',
-  'objective',
-  'sampleSize',
+  'clean',
+  'reconcile',
+  'planning',
+  'highValue',
+  'stratify',
+  'design',
   'selection',
   'testing',
   'workingPaper',
@@ -68,17 +90,23 @@ const STEPS: WizardStep[] = [
 const STEP_TITLES: Record<WizardStep, string> = {
   upload: 'Upload ledger',
   worksheet: 'Choose worksheet',
-  mapping: 'Confirm headers',
-  confirm: 'Confirm population',
-  objective: 'Audit objective',
-  sampleSize: 'Sample size',
-  selection: 'Select items',
+  mapping: 'Headers & column mapping',
+  clean: 'Clean population',
+  reconcile: 'Reconcile population',
+  planning: 'Planning inputs',
+  highValue: 'High-value separation',
+  stratify: 'Stratification (design)',
+  design: 'Method, size & sampling risk',
+  selection: 'Generate sample',
   testing: 'Testing results',
   workingPaper: 'Working paper',
 }
 
-const DEFAULT_SELECTION_METHOD: SelectionMethod = 'random'
-const DEFAULT_SIZE_RATIONALE = 'Accepted calculated / suggested sample size.'
+const DEFAULT_SIZE_RATIONALE =
+  'Accepted suggested residual coverage per firm guidance.'
+const DEFAULT_SAMPLING_UNIT = 'Individual expense voucher / document'
+const DEFAULT_HIGH_VALUE_BASIS =
+  'Absolute coverage amount at or above the stated threshold (specific testing, not sampling).'
 
 function confidenceClass(confidence: MappingConfidence): string {
   return `confidence ${confidence}`
@@ -97,6 +125,60 @@ function emptyMapping(): Record<StandardField, FieldMappingState> {
   return result
 }
 
+function defaultEngagement(): EngagementMeta {
+  return {
+    wpReference: '',
+    clientName: '',
+    auditArea: 'Expenses',
+    period: '',
+    testType: 'Tests of details — vouching',
+    assertion: ASSERTION_OPTIONS[0] ?? 'Existence / Occurrence',
+    objective: '',
+    samplingUnit: DEFAULT_SAMPLING_UNIT,
+    errorDefinition: '',
+  }
+}
+
+function defaultDesignInputs(): DesignInputs {
+  return {
+    highValueThreshold: DEFAULT_HIGH_VALUE_THRESHOLD,
+    highValueBasis: DEFAULT_HIGH_VALUE_BASIS,
+    stratificationBasis: 'none',
+    stratificationOther: '',
+    riskLevel: 'high',
+    expectedError: '',
+    tolerableError: '',
+  }
+}
+
+function defaultReconciliation(): ReconciliationState {
+  return {
+    controlTotal: 0,
+    controlSource: '',
+    difference: 0,
+    explanation: '',
+    reconciled: false,
+    reviewerApproved: false,
+  }
+}
+
+function defaultSampleDesign(
+  recommended: SelectionMethod = 'random',
+): SampleDesignState {
+  return {
+    recommendedMethod: recommended,
+    selectedMethod: recommended,
+    methodOverrideReason: '',
+    methodApproved: false,
+    suggestedSize: 0,
+    confirmedSize: 0,
+    sizeRationale: DEFAULT_SIZE_RATIONALE,
+    coveragePercentUsed: null,
+    samplingRiskAccepted: false,
+    sizeReviewerApproved: false,
+  }
+}
+
 function defaultEvaluation(): EvaluationState {
   return {
     exceptionCount: 0,
@@ -106,13 +188,33 @@ function defaultEvaluation(): EvaluationState {
     furtherTesting: 'no',
     conclusion: '',
     reviewerComments: '',
-    untestedRemainderBasis:
-      'Remainder accepted based on audit risk assessment and other audit procedures performed.',
   }
 }
 
-function defaultEngagement(): EngagementMeta {
-  return { wpReference: '', clientName: '', auditArea: '', period: '' }
+function defaultSignOff(): SignOffState {
+  return {
+    preparedBy: '',
+    preparedDate: '',
+    reviewedBy: '',
+    reviewedDate: '',
+    reviewStatus: 'draft',
+    locked: false,
+    lockDate: '',
+    fileAssemblyDeadline: '',
+    amendmentNote: '',
+    amendmentReviewerApproved: false,
+  }
+}
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function addDaysIso(dateIso: string, days: number): string {
+  const d = new Date(`${dateIso}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return ''
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
 }
 
 export default function App() {
@@ -133,25 +235,27 @@ export default function App() {
 
   const [transactions, setTransactions] = useState<LedgerTransaction[]>([])
   const [excludeDrafts, setExcludeDrafts] = useState<Record<string, string>>({})
+  const [populationSummary, setPopulationSummary] = useState<PopulationSummary | null>(
+    null,
+  )
+
+  const [reconciliation, setReconciliation] =
+    useState<ReconciliationState>(defaultReconciliation())
 
   const [engagement, setEngagement] = useState<EngagementMeta>(defaultEngagement())
-  const [objective, setObjective] = useState('')
-  const [samplingUnit, setSamplingUnit] = useState('Individual transaction / voucher')
-  const [path, setPath] = useState<SampleSizePath>('pathA')
-  const [pathA, setPathA] = useState<PathAInputs>({
-    riskLevel: 2,
-    expectedError: 2,
-    otherEvidence: 2,
-  })
-  const [pathB, setPathB] = useState<PathBResult | null>(null)
+  const [designInputs, setDesignInputs] = useState<DesignInputs>(defaultDesignInputs())
 
-  const [confirmedSize, setConfirmedSize] = useState(0)
-  const [sizeRationale, setSizeRationale] = useState(DEFAULT_SIZE_RATIONALE)
-  const [reviewerApproved, setReviewerApproved] = useState(false)
+  const [highValueItems, setHighValueItems] = useState<LedgerTransaction[]>([])
+  const [residualItems, setResidualItems] = useState<LedgerTransaction[]>([])
+
+  const [sampleDesign, setSampleDesign] = useState<SampleDesignState>(
+    defaultSampleDesign(),
+  )
+  const [coveragePercentOverride, setCoveragePercentOverride] = useState(
+    SMALL_POP_HIGH_RISK_DEFAULT_PCT,
+  )
   const [sizeWarning, setSizeWarning] = useState('')
 
-  const [method, setMethod] = useState<SelectionMethod>(DEFAULT_SELECTION_METHOD)
-  const [methodChangeReason, setMethodChangeReason] = useState('')
   const [blockStart, setBlockStart] = useState(0)
   const [blockRationale, setBlockRationale] = useState('')
   const [haphazardIds, setHaphazardIds] = useState<string[]>([])
@@ -163,6 +267,7 @@ export default function App() {
   const [testing, setTesting] = useState<TestingResult[]>([])
   const [evaluation, setEvaluation] = useState<EvaluationState>(defaultEvaluation())
 
+  const [signOff, setSignOff] = useState<SignOffState>(defaultSignOff())
   const [configSnapshot, setConfigSnapshot] = useState<FirmConfigSnapshot | null>(null)
 
   const sheet = ledger?.sheets[sheetIndex]
@@ -175,25 +280,70 @@ export default function App() {
   }, [sheet, headerRow])
 
   const activePop = useMemo(() => activeTransactions(transactions), [transactions])
-  const coverageTotal = useMemo(() => totalCoverageValue(transactions), [transactions])
-  const unresolvedCount = useMemo(() => unresolvedBothSides(transactions), [transactions])
+  const cleanedValue = useMemo(() => totalCoverageValue(transactions), [transactions])
+  const unresolvedCount = useMemo(
+    () => unresolvedBothSides(transactions),
+    [transactions],
+  )
   const dataHash = useMemo(() => hashExtractedData(transactions), [transactions])
 
-  const pathAResult = useMemo(
-    () => pathASampleSize(pathA, activePop.length),
-    [pathA, activePop.length],
+  const liveSummary = useMemo(
+    () => buildPopulationSummary(transactions),
+    [transactions],
   )
 
-  const suggestedSize =
-    path === 'pathA'
-      ? pathAResult.finalSize
-      : Math.min(pathB?.suggestedSampleSize ?? 0, activePop.length)
+  const liveHvSplit = useMemo(
+    () =>
+      separateHighValue(
+        activePop,
+        designInputs.highValueThreshold > 0
+          ? designInputs.highValueThreshold
+          : Number.POSITIVE_INFINITY,
+      ),
+    [activePop, designInputs.highValueThreshold],
+  )
 
-  const minimumFloor = Math.min(DEFAULT_MIN_ITEM_COUNT, activePop.length)
+  const residualForDesign = useMemo(
+    () => (residualItems.length || highValueItems.length ? residualItems : liveHvSplit.residual),
+    [residualItems, highValueItems.length, liveHvSplit.residual],
+  )
 
-  const isHundredPercent = activePop.length > 0 && confirmedSize === activePop.length
+  const hvForDesign = useMemo(
+    () => (residualItems.length || highValueItems.length ? highValueItems : liveHvSplit.highValue),
+    [highValueItems, residualItems.length, liveHvSplit.highValue],
+  )
 
-  const selectedCoverage = useMemo(() => totalCoverageValue(selected), [selected])
+  const strataRows = useMemo(
+    () => stratumSummary(residualForDesign),
+    [residualForDesign],
+  )
+
+  const methodRecommendation = useMemo(
+    () =>
+      recommendMethod({
+        residual: residualForDesign,
+        riskLevel: designInputs.riskLevel,
+        highValueCount: hvForDesign.length,
+      }),
+    [residualForDesign, designInputs.riskLevel, hvForDesign.length],
+  )
+
+  const sizeSuggestion = useMemo(() => {
+    const residualCount = residualForDesign.length
+    const allowBand =
+      residualCount <= 30 &&
+      (designInputs.riskLevel === 'high' || designInputs.riskLevel === 'veryHigh')
+    return suggestResidualSampleSize({
+      residualCount,
+      riskLevel: designInputs.riskLevel,
+      coveragePercentOverride: allowBand ? coveragePercentOverride : null,
+    })
+  }, [residualForDesign.length, designInputs.riskLevel, coveragePercentOverride])
+
+  const reconcileDifference = useMemo(
+    () => cleanedValue - reconciliation.controlTotal,
+    [cleanedValue, reconciliation.controlTotal],
+  )
 
   const mappingWarnings = useMemo(
     () => (sheet ? validateRequiredMappings(mapping) : []),
@@ -204,7 +354,17 @@ export default function App() {
     [mapping],
   )
 
+  const selectedCoverage = useMemo(() => totalCoverageValue(selected), [selected])
+  const hvCoverage = useMemo(() => totalCoverageValue(hvForDesign), [hvForDesign])
+  const residualCoverage = useMemo(
+    () => totalCoverageValue(residualForDesign),
+    [residualForDesign],
+  )
+
   const stepIndex = STEPS.indexOf(step)
+  const smallHighRiskBand =
+    residualForDesign.length <= 30 &&
+    (designInputs.riskLevel === 'high' || designInputs.riskLevel === 'veryHigh')
 
   function goNext() {
     const next = STEPS[stepIndex + 1]
@@ -219,26 +379,52 @@ export default function App() {
   /**
    * Clears all state that is downstream of `fromStep` and, if the wizard is
    * currently further along than `fromStep`, moves it back to `fromStep`.
-   * Must be called whenever an upstream input changes so stale calculations,
-   * selections, testing results, or Path B provisional sizing cannot survive
-   * an upstream edit.
    */
   function invalidateFrom(fromStep: WizardStep) {
     const idx = STEPS.indexOf(fromStep)
-    const confirmIdx = STEPS.indexOf('confirm')
-    const sampleSizeIdx = STEPS.indexOf('sampleSize')
+    const cleanIdx = STEPS.indexOf('clean')
+    const reconcileIdx = STEPS.indexOf('reconcile')
+    const planningIdx = STEPS.indexOf('planning')
+    const highValueIdx = STEPS.indexOf('highValue')
+    const stratifyIdx = STEPS.indexOf('stratify')
+    const designIdx = STEPS.indexOf('design')
     const selectionIdx = STEPS.indexOf('selection')
     const testingIdx = STEPS.indexOf('testing')
 
-    if (idx < confirmIdx) {
+    if (idx < cleanIdx) {
       setTransactions([])
       setExcludeDrafts({})
+      setPopulationSummary(null)
     }
-    if (idx < sampleSizeIdx) {
-      setPathB(null)
-      setConfirmedSize(0)
-      setSizeRationale(DEFAULT_SIZE_RATIONALE)
-      setReviewerApproved(false)
+    if (idx <= cleanIdx) {
+      setReconciliation(defaultReconciliation())
+      setPopulationSummary(null)
+    }
+    if (idx < reconcileIdx) {
+      setReconciliation(defaultReconciliation())
+    }
+    if (idx < planningIdx) {
+      // engagement kept editable but downstream design cleared below
+    }
+    if (idx <= highValueIdx) {
+      setHighValueItems([])
+      setResidualItems([])
+    }
+    if (idx < stratifyIdx) {
+      setDesignInputs((prev) => ({
+        ...prev,
+        stratificationBasis: idx < highValueIdx ? 'none' : prev.stratificationBasis,
+        stratificationOther: idx < highValueIdx ? '' : prev.stratificationOther,
+      }))
+    }
+    if (idx <= stratifyIdx) {
+      setResidualItems((prev) =>
+        prev.map((t) => ({ ...t, stratumKey: 'all' })),
+      )
+    }
+    if (idx < designIdx) {
+      setSampleDesign(defaultSampleDesign())
+      setCoveragePercentOverride(SMALL_POP_HIGH_RISK_DEFAULT_PCT)
       setSizeWarning('')
     }
     if (idx <= selectionIdx) {
@@ -246,8 +432,6 @@ export default function App() {
       setSelectionMeta(null)
     }
     if (idx < selectionIdx) {
-      setMethod(DEFAULT_SELECTION_METHOD)
-      setMethodChangeReason('')
       setBlockStart(0)
       setBlockRationale('')
       setHaphazardIds([])
@@ -257,6 +441,7 @@ export default function App() {
       setTesting([])
       setEvaluation(defaultEvaluation())
       setConfigSnapshot(null)
+      setSignOff(defaultSignOff())
     }
 
     setError('')
@@ -340,10 +525,13 @@ export default function App() {
     const resolved = fillUnmappedByColumnOrder(mapping, headerTexts.length)
     setMapping(resolved)
 
-    const mapIndexes = MAPPING_FIELD_ORDER.reduce((acc, field) => {
-      acc[field] = resolved[field].columnIndex
-      return acc
-    }, {} as Record<StandardField, number | null>)
+    const mapIndexes = MAPPING_FIELD_ORDER.reduce(
+      (acc, field) => {
+        acc[field] = resolved[field].columnIndex
+        return acc
+      },
+      {} as Record<StandardField, number | null>,
+    )
 
     const result = buildTransactions({
       rows: sheet.rows,
@@ -362,14 +550,19 @@ export default function App() {
     setError('')
     setWarnings(result.warnings)
     setTransactions(result.transactions)
-    setStep('confirm')
+    setPopulationSummary(buildPopulationSummary(result.transactions))
+    setStep('clean')
   }
 
   function resolveRow(id: string, resolution: CoverageResolution) {
-    setTransactions((prev) =>
-      prev.map((t) => (t.id === id ? resolveTransactionCoverage(t, resolution) : t)),
-    )
-    invalidateFrom('confirm')
+    setTransactions((prev) => {
+      const next = prev.map((t) =>
+        t.id === id ? resolveTransactionCoverage(t, resolution) : t,
+      )
+      setPopulationSummary(buildPopulationSummary(next))
+      return next
+    })
+    invalidateFrom('clean')
   }
 
   function excludeRow(id: string) {
@@ -378,22 +571,30 @@ export default function App() {
       setError('Please enter a reason before excluding this row.')
       return
     }
-    setTransactions((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, excluded: true, exclusionReason: reason } : t)),
-    )
+    setTransactions((prev) => {
+      const next = prev.map((t) =>
+        t.id === id ? { ...t, excluded: true, exclusionReason: reason } : t,
+      )
+      setPopulationSummary(buildPopulationSummary(next))
+      return next
+    })
     setExcludeDrafts((prev) => ({ ...prev, [id]: '' }))
-    invalidateFrom('confirm')
+    invalidateFrom('clean')
     setError('')
   }
 
   function restoreRow(id: string) {
-    setTransactions((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, excluded: false, exclusionReason: '' } : t)),
-    )
-    invalidateFrom('confirm')
+    setTransactions((prev) => {
+      const next = prev.map((t) =>
+        t.id === id ? { ...t, excluded: false, exclusionReason: '' } : t,
+      )
+      setPopulationSummary(buildPopulationSummary(next))
+      return next
+    })
+    invalidateFrom('clean')
   }
 
-  function confirmPopulation() {
+  function continueFromClean() {
     if (unresolvedCount > 0) {
       setError(
         `${unresolvedCount} row(s) still need Debit/Credit resolution before continuing.`,
@@ -404,110 +605,268 @@ export default function App() {
       setError('No active transactions remain. Restore or fix rows before continuing.')
       return
     }
+    const summary = buildPopulationSummary(transactions)
+    setPopulationSummary(summary)
+    setReconciliation((prev) => ({
+      ...prev,
+      difference: summary.cleanedValue - prev.controlTotal,
+      reconciled: false,
+    }))
     setError('')
-    setStep('objective')
+    setStep('reconcile')
   }
 
-  function updatePath(next: SampleSizePath) {
-    invalidateFrom('objective')
-    setPath(next)
-  }
-
-  function updatePathA(key: keyof PathAInputs, value: RiskScore) {
-    invalidateFrom('objective')
-    setPathA((prev) => ({ ...prev, [key]: value }))
-  }
-
-  function continueFromObjective() {
-    if (
-      !engagement.wpReference.trim() ||
-      !engagement.clientName.trim() ||
-      !engagement.auditArea.trim() ||
-      !engagement.period.trim()
-    ) {
-      setError('Please complete the WP reference, client, audit area, and period.')
-      return
-    }
-    if (!objective.trim() || !samplingUnit.trim()) {
-      setError('Please enter the audit objective and sampling unit.')
-      return
-    }
-    if (path === 'pathB' && coverageTotal <= 0) {
-      setError('Path B cannot be used when total coverage value is zero.')
-      return
-    }
-
-    setError('')
-    if (path === 'pathB') {
-      const result = pathBSizing(activePop)
-      setPathB(result)
-      setConfirmedSize(Math.min(result.suggestedSampleSize, activePop.length))
-    } else {
-      setPathB(null)
-      setConfirmedSize(pathASampleSize(pathA, activePop.length).finalSize)
-    }
-    setSizeRationale(DEFAULT_SIZE_RATIONALE)
-    setReviewerApproved(false)
-    setSizeWarning('')
-    setStep('sampleSize')
-  }
-
-  function updateConfirmedSize(value: number) {
-    invalidateFrom('sampleSize')
-    setConfirmedSize(value)
-    setSizeWarning('')
-  }
-
-  function updateSizeRationale(value: string) {
-    invalidateFrom('sampleSize')
-    setSizeRationale(value)
-  }
-
-  function updateReviewerApproved(value: boolean) {
-    invalidateFrom('sampleSize')
-    setReviewerApproved(value)
-  }
-
-  function confirmSampleSize() {
-    const result = validateSampleSizeOverride({
-      proposed: confirmedSize,
-      calculated: suggestedSize,
-      minimumFloor,
-      population: activePop.length,
-      rationale: sizeRationale,
-      reviewerApproved,
+  function updateReconciliation<K extends keyof ReconciliationState>(
+    key: K,
+    value: ReconciliationState[K],
+  ) {
+    invalidateFrom('reconcile')
+    setReconciliation((prev) => {
+      const next = { ...prev, [key]: value }
+      const difference = cleanedValue - (key === 'controlTotal' ? Number(value) : next.controlTotal)
+      next.difference = difference
+      const absDiff = Math.abs(difference)
+      next.reconciled =
+        absDiff <= 0.01 ||
+        (Boolean(next.explanation.trim()) && next.reviewerApproved)
+      return next
     })
-    if (!result.ok) {
-      setError(result.error ?? 'Invalid sample size.')
+  }
+
+  function continueFromReconcile() {
+    const difference = cleanedValue - reconciliation.controlTotal
+    const absDiff = Math.abs(difference)
+    if (absDiff > 0.01 && !reconciliation.explanation.trim()) {
+      setError(
+        'Population does not reconcile to the control total. Record an explanation (hard stop).',
+      )
+      return
+    }
+    if (absDiff > 0.01 && !reconciliation.reviewerApproved) {
+      setError(
+        'Difference exceeds tolerance. Reviewer approval is required before continuing.',
+      )
+      return
+    }
+    const reconciled =
+      absDiff <= 0.01 ||
+      (Boolean(reconciliation.explanation.trim()) && reconciliation.reviewerApproved)
+    setReconciliation((prev) => ({
+      ...prev,
+      difference,
+      reconciled,
+    }))
+    setError('')
+    setStep('planning')
+  }
+
+  function continueFromPlanning() {
+    const required: Array<[string, string]> = [
+      [engagement.wpReference, 'WP reference'],
+      [engagement.clientName, 'Client name'],
+      [engagement.auditArea, 'Audit area'],
+      [engagement.period, 'Period'],
+      [engagement.testType, 'Test type'],
+      [engagement.assertion, 'Assertion'],
+      [engagement.objective, 'Objective'],
+      [engagement.samplingUnit, 'Sampling unit'],
+      [engagement.errorDefinition, 'Error definition'],
+    ]
+    const missing = required.filter(([v]) => !v.trim()).map(([, label]) => label)
+    if (missing.length) {
+      setError(`Please complete: ${missing.join(', ')}.`)
       return
     }
     setError('')
-    setSizeWarning(result.warning ?? '')
-    setStep('selection')
+    setStep('highValue')
   }
 
-  function updateMethod(next: SelectionMethod) {
-    invalidateFrom('selection')
-    setMethod(next)
-    if (next === DEFAULT_SELECTION_METHOD) setMethodChangeReason('')
+  function continueFromHighValue() {
+    const split = separateHighValue(
+      activePop,
+      designInputs.highValueThreshold > 0
+        ? designInputs.highValueThreshold
+        : Number.POSITIVE_INFINITY,
+    )
+    if (split.highValue.length === 0 && split.residual.length === 0) {
+      setError('No items remain after high-value separation.')
+      return
+    }
+    setHighValueItems(split.highValue)
+    setResidualItems(split.residual.map((t) => ({ ...t, stratumKey: 'all' })))
+    if (split.residual.length === 0) {
+      setWarnings([
+        'Residual population is empty — all active items are high-value and will be tested as specific items (100% specific testing, no sampling).',
+      ])
+    } else {
+      setWarnings([])
+    }
+    setError('')
+    setStep('stratify')
+  }
+
+  function continueFromStratify() {
+    const keyed = applyStratumKeys(
+      residualItems.length ? residualItems : liveHvSplit.residual,
+      designInputs.stratificationBasis,
+      designInputs.stratificationOther || undefined,
+    )
+    setResidualItems(keyed)
+    if (!highValueItems.length && !residualItems.length) {
+      const split = separateHighValue(
+        activePop,
+        designInputs.highValueThreshold > 0
+          ? designInputs.highValueThreshold
+          : Number.POSITIVE_INFINITY,
+      )
+      setHighValueItems(split.highValue)
+      setResidualItems(
+        applyStratumKeys(
+          split.residual,
+          designInputs.stratificationBasis,
+          designInputs.stratificationOther || undefined,
+        ),
+      )
+    }
+    const recommendation = recommendMethod({
+      residual: keyed,
+      riskLevel: designInputs.riskLevel,
+      highValueCount: (highValueItems.length
+        ? highValueItems
+        : liveHvSplit.highValue
+      ).length,
+    })
+    const suggestion = suggestResidualSampleSize({
+      residualCount: keyed.length,
+      riskLevel: designInputs.riskLevel,
+      coveragePercentOverride:
+        keyed.length <= 30 &&
+        (designInputs.riskLevel === 'high' || designInputs.riskLevel === 'veryHigh')
+          ? coveragePercentOverride
+          : null,
+    })
+    setSampleDesign({
+      ...defaultSampleDesign(recommendation.recommended),
+      recommendedMethod: recommendation.recommended,
+      selectedMethod: recommendation.recommended,
+      suggestedSize: suggestion.suggestedSize,
+      confirmedSize: suggestion.suggestedSize,
+      coveragePercentUsed: suggestion.coveragePercent,
+      sizeRationale: DEFAULT_SIZE_RATIONALE,
+    })
+    setError('')
+    setStep('design')
+  }
+
+  function updateDesignMethod(next: SelectionMethod) {
+    invalidateFrom('design')
+    setSampleDesign((prev) => ({
+      ...prev,
+      selectedMethod: next,
+      methodOverrideReason:
+        next === prev.recommendedMethod ? '' : prev.methodOverrideReason,
+    }))
+  }
+
+  function continueFromDesign() {
+    const residual = residualForDesign
+    const suggestion = sizeSuggestion
+
+    if (residual.length > 0) {
+      if (!sampleDesign.methodApproved) {
+        setError('Method must be approved before continuing (hard stop).')
+        return
+      }
+      if (
+        sampleDesign.selectedMethod !== sampleDesign.recommendedMethod &&
+        !sampleDesign.methodOverrideReason.trim()
+      ) {
+        setError(
+          'Record a reason for selecting a method different from the recommendation.',
+        )
+        return
+      }
+      if (!sampleDesign.samplingRiskAccepted) {
+        setError('Sampling risk statement must be accepted (hard stop).')
+        return
+      }
+      if (!sampleDesign.sizeRationale.trim()) {
+        setError('Sample-size rationale is required (hard stop).')
+        return
+      }
+
+      const validation = validateSampleSizeOverride({
+        proposed: sampleDesign.confirmedSize,
+        calculated: suggestion.suggestedSize,
+        population: residual.length,
+        rationale: sampleDesign.sizeRationale,
+        reviewerApproved: sampleDesign.sizeReviewerApproved,
+      })
+      if (!validation.ok) {
+        setError(validation.error ?? 'Invalid sample size.')
+        return
+      }
+      setSizeWarning(validation.warning ?? '')
+      setSampleDesign((prev) => ({
+        ...prev,
+        suggestedSize: suggestion.suggestedSize,
+        coveragePercentUsed: suggestion.coveragePercent,
+      }))
+    } else {
+      setSampleDesign((prev) => ({
+        ...prev,
+        suggestedSize: 0,
+        confirmedSize: 0,
+        coveragePercentUsed: 0,
+        methodApproved: true,
+        samplingRiskAccepted: true,
+      }))
+      setSizeWarning('')
+    }
+
+    setError('')
+    setStep('selection')
   }
 
   function toggleHaphazard(id: string) {
     invalidateFrom('selection')
     setHaphazardIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id)
-      if (prev.length >= confirmedSize) return prev
+      if (prev.length >= sampleDesign.confirmedSize) return prev
       return [...prev, id]
     })
   }
 
   function runSelection() {
-    if (confirmedSize < 1) return
+    const residual = residualForDesign
+    const size = sampleDesign.confirmedSize
+    const method = sampleDesign.selectedMethod
 
-    if (method !== DEFAULT_SELECTION_METHOD && !methodChangeReason.trim()) {
-      setError(
-        'Please record a reason for changing the selection method from the default (Random).',
-      )
+    if (residual.length === 0) {
+      setSelected([])
+      setSelectionMeta({
+        method,
+        timestamp: new Date().toISOString(),
+        toolVersion: TOOL_VERSION,
+        dataHash: hashExtractedData(residual),
+        selectedIds: [],
+        rationale: 'No residual population — sampling not applied; HV specific testing only.',
+      })
+      setTesting([])
+      setError('')
+      setStep('testing')
+      return
+    }
+
+    if (size < 1) {
+      setError('Confirmed sample size must be at least 1 for the residual population.')
+      return
+    }
+    if (
+      method !== sampleDesign.recommendedMethod &&
+      !sampleDesign.methodOverrideReason.trim()
+    ) {
+      setError('Method override reason is required.')
       return
     }
     if (method === 'block' && !blockRationale.trim()) {
@@ -519,8 +878,8 @@ export default function App() {
         setError('Please confirm the haphazard selection was made without conscious bias.')
         return
       }
-      if (haphazardIds.length !== confirmedSize) {
-        setError(`Please select exactly ${confirmedSize} transactions.`)
+      if (haphazardIds.length !== size) {
+        setError(`Please select exactly ${size} residual transactions.`)
         return
       }
     }
@@ -528,27 +887,30 @@ export default function App() {
     let outcome: { selected: LedgerTransaction[]; meta: SelectionMeta }
     try {
       if (method === 'random') {
-        outcome = selectRandom(activePop, confirmedSize)
+        outcome = selectRandom(residual, size)
       } else if (method === 'systematic') {
-        outcome = selectSystematic(activePop, confirmedSize)
+        outcome = selectSystematic(residual, size)
       } else if (method === 'block') {
-        outcome = selectBlock(activePop, confirmedSize, blockStart, blockRationale)
+        outcome = selectBlock(residual, size, blockStart, blockRationale)
       } else {
-        outcome = selectHaphazard(activePop, haphazardIds, haphazardBiasConfirmed)
+        outcome = selectHaphazard(residual, haphazardIds, haphazardBiasConfirmed)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Selection failed.')
       return
     }
 
-    if (outcome.selected.length !== confirmedSize) {
+    if (outcome.selected.length !== size) {
       setError('Selected item count must equal the confirmed sample size.')
       return
     }
 
     setError('')
     setSelected(outcome.selected)
-    setSelectionMeta(outcome.meta)
+    setSelectionMeta({
+      ...outcome.meta,
+      rationale: sampleDesign.methodOverrideReason || outcome.meta.rationale,
+    })
     setTesting(
       outcome.selected.map((item) => ({
         transactionId: item.id,
@@ -560,6 +922,17 @@ export default function App() {
       })),
     )
     setStep('testing')
+  }
+
+  function updateTesting(
+    transactionId: string,
+    patch: Partial<TestingResult>,
+  ) {
+    setTesting((prev) =>
+      prev.map((row) =>
+        row.transactionId === transactionId ? { ...row, ...patch } : row,
+      ),
+    )
   }
 
   function finishTesting() {
@@ -575,7 +948,37 @@ export default function App() {
     )
     setEvaluation((prev) => ({ ...prev, exceptionCount, exceptionValue }))
     setConfigSnapshot(captureFirmConfigSnapshot())
+    setSignOff((prev) => ({
+      ...prev,
+      reviewStatus: prev.preparedBy ? 'prepared' : 'draft',
+      fileAssemblyDeadline: prev.fileAssemblyDeadline,
+    }))
     setStep('workingPaper')
+  }
+
+  function lockWorkingPaper() {
+    if (!signOff.reviewedBy.trim()) {
+      setError('Reviewed by is required before locking the working paper.')
+      return
+    }
+    if (signOff.locked && signOff.amendmentNote.trim() && !signOff.amendmentReviewerApproved) {
+      setError(
+        'Amendment note changed while locked — amendment reviewer approval is required.',
+      )
+      return
+    }
+    const lockDate = todayIsoDate()
+    setSignOff((prev) => ({
+      ...prev,
+      locked: true,
+      lockDate,
+      reviewStatus: 'locked',
+      reviewedDate: prev.reviewedDate || lockDate,
+      fileAssemblyDeadline:
+        prev.fileAssemblyDeadline ||
+        addDaysIso(lockDate, FILE_ASSEMBLY_DEADLINE_DAYS),
+    }))
+    setError('')
   }
 
   function resetAll() {
@@ -591,18 +994,15 @@ export default function App() {
     setMapping(emptyMapping())
     setTransactions([])
     setExcludeDrafts({})
+    setPopulationSummary(null)
+    setReconciliation(defaultReconciliation())
     setEngagement(defaultEngagement())
-    setObjective('')
-    setSamplingUnit('Individual transaction / voucher')
-    setPath('pathA')
-    setPathA({ riskLevel: 2, expectedError: 2, otherEvidence: 2 })
-    setPathB(null)
-    setConfirmedSize(0)
-    setSizeRationale(DEFAULT_SIZE_RATIONALE)
-    setReviewerApproved(false)
+    setDesignInputs(defaultDesignInputs())
+    setHighValueItems([])
+    setResidualItems([])
+    setSampleDesign(defaultSampleDesign())
+    setCoveragePercentOverride(SMALL_POP_HIGH_RISK_DEFAULT_PCT)
     setSizeWarning('')
-    setMethod(DEFAULT_SELECTION_METHOD)
-    setMethodChangeReason('')
     setBlockStart(0)
     setBlockRationale('')
     setHaphazardIds([])
@@ -611,8 +1011,15 @@ export default function App() {
     setSelectionMeta(null)
     setTesting([])
     setEvaluation(defaultEvaluation())
+    setSignOff(defaultSignOff())
     setConfigSnapshot(null)
   }
+
+  const summary = populationSummary ?? liveSummary
+  const flaggedDuplicates = transactions.filter((t) => t.isDuplicateVoucher)
+  const flaggedTotals = transactions.filter((t) => t.looksLikeTotal)
+  const flaggedOpening = transactions.filter((t) => t.looksLikeOpeningClosing)
+  const flaggedZeroNeg = transactions.filter((t) => t.isZeroOrNegative)
 
   return (
     <div className="app-shell">
@@ -632,7 +1039,7 @@ export default function App() {
         {error && <div className="banner error">{error}</div>}
         {warnings.length > 0 && step !== 'upload' && (
           <div className="banner warn">
-            {warnings.slice(0, 4).map((w) => (
+            {warnings.slice(0, 6).map((w) => (
               <div key={w}>{w}</div>
             ))}
           </div>
@@ -698,11 +1105,9 @@ export default function App() {
         {step === 'mapping' && sheet && (
           <section className="card">
             <p className="lead-inline">
-              The header row and where data starts are detected automatically.
-              Data begins on the row right after the header. Column mapping is
-              optional — if the right headers are already present, you can continue
-              without mapping every field. Unmapped columns are filled in order:
-              Date, Voucher No, Description, Debit, Credit.
+              The header row and where data starts are detected automatically. Column
+              mapping is optional — unmapped columns are filled in order: Date, Voucher
+              No, Description, Debit, Credit.
             </p>
 
             <div className="auto-note">
@@ -781,15 +1186,12 @@ export default function App() {
 
             <h3 className="map-heading">Column mapping (optional)</h3>
             <p className="lead-inline">
-              Adjust only if auto-detect looks wrong. Account No and Amount are
-              optional alternatives — use Amount if the ledger has no Debit/Credit,
-              and Account No if there is no Voucher No.
+              Adjust only if auto-detect looks wrong. Soft warnings do not block
+              continue.
             </p>
 
             {mappingWarnings.length > 0 && (
-              <div className="banner warn">
-                {mappingWarnings.join('  •  ')}
-              </div>
+              <div className="banner warn">{mappingWarnings.join('  •  ')}</div>
             )}
 
             {needsChoiceFields.length > 0 && (
@@ -869,31 +1271,55 @@ export default function App() {
           </section>
         )}
 
-        {step === 'confirm' && (
+        {step === 'clean' && (
           <section className="card">
             <div className="stat-grid">
               <div>
-                <span>Total rows built</span>
-                <strong>{transactions.length}</strong>
+                <span>Original rows</span>
+                <strong>{summary.originalCount}</strong>
               </div>
               <div>
-                <span>Active transactions</span>
-                <strong>{activePop.length}</strong>
+                <span>Cleaned population</span>
+                <strong>{summary.cleanedCount}</strong>
               </div>
               <div>
-                <span>Excluded rows</span>
-                <strong>{transactions.length - activePop.length}</strong>
+                <span>Excluded</span>
+                <strong>{summary.excludedCount}</strong>
               </div>
               <div>
-                <span>Total coverage value</span>
-                <strong>{formatMoney(coverageTotal)}</strong>
+                <span>Cleaned value</span>
+                <strong>{formatMoney(summary.cleanedValue)}</strong>
               </div>
             </div>
+
+            <div className="stat-grid">
+              <div>
+                <span>Flagged totals</span>
+                <strong>{summary.flaggedTotals}</strong>
+              </div>
+              <div>
+                <span>Opening / closing</span>
+                <strong>{summary.flaggedOpeningClosing}</strong>
+              </div>
+              <div>
+                <span>Zero / negative</span>
+                <strong>{summary.flaggedZeroNegative}</strong>
+              </div>
+              <div>
+                <span>Duplicates (not auto-excluded)</span>
+                <strong>{summary.flaggedDuplicates}</strong>
+              </div>
+            </div>
+
+            <p className="lead-inline">
+              Resolve debit+credit conflicts. Flags are informational — duplicates are
+              not auto-excluded. Exclude with a recorded reason when appropriate.
+            </p>
 
             {unresolvedCount > 0 && (
               <div className="banner error">
                 {unresolvedCount} row(s) have both Debit and Credit values. Resolve each
-                row below before confirming.
+                row below before continuing.
               </div>
             )}
             {activePop.length === 0 && (
@@ -902,9 +1328,43 @@ export default function App() {
               </div>
             )}
 
-            <p className="lead-inline">
-              Review all {transactions.length} transactions below before confirming.
-            </p>
+            {(flaggedTotals.length > 0 ||
+              flaggedOpening.length > 0 ||
+              flaggedZeroNeg.length > 0 ||
+              flaggedDuplicates.length > 0) && (
+              <div className="banner warn">
+                Review flagged rows: {flaggedTotals.length} total(s),{' '}
+                {flaggedOpening.length} opening/closing, {flaggedZeroNeg.length}{' '}
+                zero/negative, {flaggedDuplicates.length} duplicate voucher(s).
+              </div>
+            )}
+
+            {summary.byReason.length > 0 && (
+              <>
+                <h3>Exclusion summary</h3>
+                <div className="preview-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Reason</th>
+                        <th>Count</th>
+                        <th>Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summary.byReason.map((row) => (
+                        <tr key={row.reason}>
+                          <td>{row.reason}</td>
+                          <td>{row.count}</td>
+                          <td>{formatMoney(row.value)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
             <div className="preview-table-wrap preview-table-all">
               <table>
                 <thead>
@@ -917,6 +1377,7 @@ export default function App() {
                     <th>Debit</th>
                     <th>Credit</th>
                     <th>Coverage</th>
+                    <th>Flags</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -932,6 +1393,17 @@ export default function App() {
                       <td>{formatMoney(t.debit)}</td>
                       <td>{formatMoney(t.credit)}</td>
                       <td>{formatMoney(t.coverageAmount)}</td>
+                      <td>
+                        {[
+                          t.looksLikeTotal ? 'total' : '',
+                          t.looksLikeOpeningClosing ? 'open/close' : '',
+                          t.isZeroOrNegative ? 'zero/neg' : '',
+                          t.isDuplicateVoucher ? 'duplicate' : '',
+                          t.bothSidesWarning ? 'both sides' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(', ') || '—'}
+                      </td>
                       <td>
                         {t.needsCoverageResolution
                           ? 'Needs resolution'
@@ -1007,6 +1479,7 @@ export default function App() {
                 </tbody>
               </table>
             </div>
+
             <div className="actions">
               <button type="button" className="ghost" onClick={goBack}>
                 Back
@@ -1014,26 +1487,122 @@ export default function App() {
               <button
                 type="button"
                 className="primary"
-                onClick={confirmPopulation}
+                onClick={continueFromClean}
                 disabled={unresolvedCount > 0 || activePop.length === 0}
               >
-                Confirm population
+                Continue to reconcile
               </button>
             </div>
           </section>
         )}
 
-        {step === 'objective' && (
+        {step === 'reconcile' && (
           <section className="card">
-            <div className="grid-3">
+            <div className="stat-grid">
+              <div>
+                <span>Cleaned value</span>
+                <strong>{formatMoney(cleanedValue)}</strong>
+              </div>
+              <div>
+                <span>Control total</span>
+                <strong>{formatMoney(reconciliation.controlTotal)}</strong>
+              </div>
+              <div>
+                <span>Difference</span>
+                <strong>{formatMoney(reconcileDifference)}</strong>
+              </div>
+              <div>
+                <span>Status</span>
+                <strong>
+                  {Math.abs(reconcileDifference) <= 0.01
+                    ? 'Reconciles'
+                    : 'Difference'}
+                </strong>
+              </div>
+            </div>
+
+            <div className="form-grid grid-3">
+              <div>
+                <label htmlFor="controlTotal">Control total</label>
+                <input
+                  id="controlTotal"
+                  type="number"
+                  value={reconciliation.controlTotal}
+                  onChange={(e) =>
+                    updateReconciliation('controlTotal', Number(e.target.value))
+                  }
+                />
+              </div>
+              <div>
+                <label htmlFor="controlSource">Control source</label>
+                <input
+                  id="controlSource"
+                  value={reconciliation.controlSource}
+                  onChange={(e) =>
+                    updateReconciliation('controlSource', e.target.value)
+                  }
+                  placeholder="e.g. Trial balance / GL control"
+                />
+              </div>
+            </div>
+
+            {Math.abs(reconcileDifference) > 0.01 && (
+              <>
+                <div className="banner warn">
+                  Difference of {formatMoney(reconcileDifference)} exceeds tolerance
+                  (0.01). Explanation and reviewer approval are required.
+                </div>
+                <label htmlFor="reconExplain">Explanation</label>
+                <textarea
+                  id="reconExplain"
+                  rows={3}
+                  value={reconciliation.explanation}
+                  onChange={(e) =>
+                    updateReconciliation('explanation', e.target.value)
+                  }
+                />
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={reconciliation.reviewerApproved}
+                    onChange={(e) =>
+                      updateReconciliation('reviewerApproved', e.target.checked)
+                    }
+                  />
+                  <span>Reviewer approves proceeding with this difference.</span>
+                </label>
+              </>
+            )}
+
+            <div className="actions">
+              <button type="button" className="ghost" onClick={goBack}>
+                Back
+              </button>
+              <button type="button" className="primary" onClick={continueFromReconcile}>
+                Continue to planning
+              </button>
+            </div>
+          </section>
+        )}
+
+        {step === 'planning' && (
+          <section className="card">
+            <p className="lead-inline">
+              Complete planning inputs required for the working paper (hard stops).
+            </p>
+            <div className="form-grid grid-3">
               <div>
                 <label htmlFor="wpRef">WP reference</label>
                 <input
                   id="wpRef"
                   value={engagement.wpReference}
-                  onChange={(e) =>
-                    setEngagement((prev) => ({ ...prev, wpReference: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    invalidateFrom('planning')
+                    setEngagement((prev) => ({
+                      ...prev,
+                      wpReference: e.target.value,
+                    }))
+                  }}
                 />
               </div>
               <div>
@@ -1041,190 +1610,621 @@ export default function App() {
                 <input
                   id="clientName"
                   value={engagement.clientName}
-                  onChange={(e) =>
-                    setEngagement((prev) => ({ ...prev, clientName: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    invalidateFrom('planning')
+                    setEngagement((prev) => ({
+                      ...prev,
+                      clientName: e.target.value,
+                    }))
+                  }}
                 />
               </div>
               <div>
                 <label htmlFor="auditArea">Audit area</label>
-                <input
+                <select
                   id="auditArea"
                   value={engagement.auditArea}
-                  onChange={(e) =>
-                    setEngagement((prev) => ({ ...prev, auditArea: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    invalidateFrom('planning')
+                    setEngagement((prev) => ({
+                      ...prev,
+                      auditArea: e.target.value,
+                    }))
+                  }}
+                >
+                  {AUDIT_AREA_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="period">Period</label>
+                <input
+                  id="period"
+                  value={engagement.period}
+                  onChange={(e) => {
+                    invalidateFrom('planning')
+                    setEngagement((prev) => ({ ...prev, period: e.target.value }))
+                  }}
+                  placeholder="e.g. Year ended 30 June 2026"
                 />
+              </div>
+              <div>
+                <label htmlFor="testType">Test type</label>
+                <select
+                  id="testType"
+                  value={engagement.testType}
+                  onChange={(e) => {
+                    invalidateFrom('planning')
+                    setEngagement((prev) => ({ ...prev, testType: e.target.value }))
+                  }}
+                >
+                  {TEST_TYPE_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="assertion">Assertion</label>
+                <select
+                  id="assertion"
+                  value={engagement.assertion}
+                  onChange={(e) => {
+                    invalidateFrom('planning')
+                    setEngagement((prev) => ({ ...prev, assertion: e.target.value }))
+                  }}
+                >
+                  {ASSERTION_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
-            <label htmlFor="period">Period</label>
-            <input
-              id="period"
-              value={engagement.period}
-              onChange={(e) =>
-                setEngagement((prev) => ({ ...prev, period: e.target.value }))
-              }
-              placeholder="e.g. Year ended 30 June 2026"
-            />
-
-            <label htmlFor="objective">Audit objective</label>
+            <label htmlFor="objective">Objective</label>
             <textarea
               id="objective"
-              rows={4}
-              value={objective}
-              onChange={(e) => setObjective(e.target.value)}
-              placeholder="e.g. Test occurrence and accuracy of purchase transactions"
+              rows={3}
+              value={engagement.objective}
+              onChange={(e) => {
+                invalidateFrom('planning')
+                setEngagement((prev) => ({ ...prev, objective: e.target.value }))
+              }}
+              placeholder="e.g. Test occurrence and accuracy of expense vouchers"
             />
+
             <label htmlFor="unit">Sampling unit</label>
             <input
               id="unit"
-              value={samplingUnit}
-              onChange={(e) => setSamplingUnit(e.target.value)}
+              value={engagement.samplingUnit}
+              onChange={(e) => {
+                invalidateFrom('planning')
+                setEngagement((prev) => ({ ...prev, samplingUnit: e.target.value }))
+              }}
             />
 
-            <label htmlFor="path">Sample-size path</label>
-            <select
-              id="path"
-              value={path}
-              onChange={(e) => updatePath(e.target.value as SampleSizePath)}
-            >
-              <option value="pathA">Path A — Risk score model</option>
-              <option value="pathB">Path B — Value coverage rule</option>
-            </select>
+            <label htmlFor="errorDef">Error definition</label>
+            <textarea
+              id="errorDef"
+              rows={2}
+              value={engagement.errorDefinition}
+              onChange={(e) => {
+                invalidateFrom('planning')
+                setEngagement((prev) => ({
+                  ...prev,
+                  errorDefinition: e.target.value,
+                }))
+              }}
+              placeholder="Define what constitutes an exception / misstatement"
+            />
 
-            {path === 'pathA' && (
-              <div className="grid-3">
-                {([
-                  ['riskLevel', 'Risk level'],
-                  ['expectedError', 'Expected error'],
-                  ['otherEvidence', 'Other audit evidence'],
-                ] as const).map(([key, label]) => (
-                  <div key={key}>
-                    <label htmlFor={key}>{label}</label>
-                    <select
-                      id={key}
-                      value={pathA[key]}
-                      onChange={(e) =>
-                        updatePathA(key, Number(e.target.value) as RiskScore)
-                      }
-                    >
-                      {([1, 2, 3, 4] as const).map((score) => (
-                        <option key={score} value={score}>
-                          {score} — {scoreLabel(score, key)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
+            <div className="form-grid grid-3">
+              <div>
+                <label htmlFor="riskLevel">Risk level</label>
+                <select
+                  id="riskLevel"
+                  value={designInputs.riskLevel}
+                  onChange={(e) => {
+                    invalidateFrom('planning')
+                    setDesignInputs((prev) => ({
+                      ...prev,
+                      riskLevel: e.target.value as RiskLevel,
+                    }))
+                  }}
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="veryHigh">Very high</option>
+                </select>
               </div>
-            )}
-
-            {path === 'pathB' && (
-              <p className="lead-inline">
-                Path B sizes the sample using cumulative value coverage against active
-                transactions ({formatMoney(coverageTotal)} total).
-              </p>
-            )}
+              <div>
+                <label htmlFor="expectedError">Expected error (optional)</label>
+                <input
+                  id="expectedError"
+                  value={designInputs.expectedError}
+                  onChange={(e) => {
+                    invalidateFrom('planning')
+                    setDesignInputs((prev) => ({
+                      ...prev,
+                      expectedError: e.target.value,
+                    }))
+                  }}
+                />
+              </div>
+              <div>
+                <label htmlFor="tolerableError">Tolerable error (optional)</label>
+                <input
+                  id="tolerableError"
+                  value={designInputs.tolerableError}
+                  onChange={(e) => {
+                    invalidateFrom('planning')
+                    setDesignInputs((prev) => ({
+                      ...prev,
+                      tolerableError: e.target.value,
+                    }))
+                  }}
+                />
+              </div>
+            </div>
 
             <div className="actions">
               <button type="button" className="ghost" onClick={goBack}>
                 Back
               </button>
-              <button type="button" className="primary" onClick={continueFromObjective}>
-                Calculate sample size
+              <button type="button" className="primary" onClick={continueFromPlanning}>
+                Continue
               </button>
             </div>
           </section>
         )}
 
-        {step === 'sampleSize' && (
+        {step === 'highValue' && (
           <section className="card">
+            <p className="lead-inline">
+              Separate high-value items for specific testing (not sampling). Residual
+              items remain eligible for sample selection.
+            </p>
+
+            <div className="form-grid grid-3">
+              <div>
+                <label htmlFor="hvThreshold">High-value threshold</label>
+                <input
+                  id="hvThreshold"
+                  type="number"
+                  min={0}
+                  value={designInputs.highValueThreshold}
+                  onChange={(e) => {
+                    invalidateFrom('highValue')
+                    setDesignInputs((prev) => ({
+                      ...prev,
+                      highValueThreshold: Number(e.target.value),
+                    }))
+                  }}
+                />
+              </div>
+            </div>
+
+            <label htmlFor="hvBasis">High-value basis</label>
+            <textarea
+              id="hvBasis"
+              rows={2}
+              value={designInputs.highValueBasis}
+              onChange={(e) => {
+                invalidateFrom('highValue')
+                setDesignInputs((prev) => ({
+                  ...prev,
+                  highValueBasis: e.target.value,
+                }))
+              }}
+            />
+
             <div className="stat-grid">
               <div>
-                <span>Active transactions</span>
-                <strong>{activePop.length}</strong>
+                <span>High-value items</span>
+                <strong>{liveHvSplit.highValue.length}</strong>
               </div>
               <div>
-                <span>Calculated / suggested size</span>
-                <strong>{suggestedSize}</strong>
+                <span>High-value coverage</span>
+                <strong>
+                  {formatMoney(totalCoverageValue(liveHvSplit.highValue))}
+                </strong>
               </div>
               <div>
-                <span>Minimum item floor</span>
-                <strong>{minimumFloor}</strong>
+                <span>Residual count</span>
+                <strong>{liveHvSplit.residual.length}</strong>
               </div>
-              {path === 'pathB' && pathB && (
+              <div>
+                <span>Residual value</span>
+                <strong>
+                  {formatMoney(totalCoverageValue(liveHvSplit.residual))}
+                </strong>
+              </div>
+            </div>
+
+            {liveHvSplit.residual.length === 0 && liveHvSplit.highValue.length > 0 && (
+              <div className="banner warn">
+                Residual is empty — continuing means 100% specific-item testing (no
+                sampling).
+              </div>
+            )}
+
+            <h3>High-value list (specific testing)</h3>
+            <div className="preview-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Date</th>
+                    <th>Voucher</th>
+                    <th>Description</th>
+                    <th>Coverage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {liveHvSplit.highValue.length === 0 ? (
+                    <tr>
+                      <td colSpan={5}>No high-value items at this threshold.</td>
+                    </tr>
+                  ) : (
+                    liveHvSplit.highValue.map((t) => (
+                      <tr key={t.id}>
+                        <td>{t.id}</td>
+                        <td>{t.date || '—'}</td>
+                        <td>{t.voucherNo || t.accountNo || '—'}</td>
+                        <td>{t.description || '—'}</td>
+                        <td>{formatMoney(t.coverageAmount)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="actions">
+              <button type="button" className="ghost" onClick={goBack}>
+                Back
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={continueFromHighValue}
+                disabled={
+                  liveHvSplit.highValue.length === 0 &&
+                  liveHvSplit.residual.length === 0
+                }
+              >
+                Continue
+              </button>
+            </div>
+          </section>
+        )}
+
+        {step === 'stratify' && (
+          <section className="card">
+            <div className="banner warn">
+              Stratification is population <strong>design</strong>, not a sampling
+              method. It organises the residual before method/size decisions.
+            </div>
+
+            <div className="form-grid grid-3">
+              <div>
+                <label htmlFor="strataBasis">Stratification basis</label>
+                <select
+                  id="strataBasis"
+                  value={designInputs.stratificationBasis}
+                  onChange={(e) => {
+                    invalidateFrom('stratify')
+                    const basis = e.target.value as StratificationBasis
+                    setDesignInputs((prev) => ({
+                      ...prev,
+                      stratificationBasis: basis,
+                    }))
+                    const source =
+                      residualItems.length > 0
+                        ? residualItems
+                        : liveHvSplit.residual
+                    setResidualItems(
+                      applyStratumKeys(
+                        source,
+                        basis,
+                        designInputs.stratificationOther || undefined,
+                      ),
+                    )
+                  }}
+                >
+                  <option value="none">None</option>
+                  <option value="value">Value bands</option>
+                  <option value="account">Account</option>
+                  <option value="vendor">Vendor</option>
+                  <option value="date">Date (YYYY-MM)</option>
+                  <option value="other">Other (extra column)</option>
+                </select>
+              </div>
+              {designInputs.stratificationBasis === 'other' && (
                 <div>
-                  <span>Required coverage</span>
-                  <strong>{formatMoney(pathB.requiredCoverageValue)}</strong>
+                  <label htmlFor="strataOther">Extra column key</label>
+                  <input
+                    id="strataOther"
+                    value={designInputs.stratificationOther}
+                    onChange={(e) => {
+                      invalidateFrom('stratify')
+                      const other = e.target.value
+                      setDesignInputs((prev) => ({
+                        ...prev,
+                        stratificationOther: other,
+                      }))
+                      const source =
+                        residualItems.length > 0
+                          ? residualItems
+                          : liveHvSplit.residual
+                      setResidualItems(
+                        applyStratumKeys(source, 'other', other || undefined),
+                      )
+                    }}
+                    placeholder="e.g. Vendor"
+                  />
                 </div>
               )}
             </div>
 
-            {path === 'pathA' && (
-              <p className="lead-inline">
-                Risk score {pathAResult.score} → calculated size {pathAResult.calculated}
-                {pathAResult.calculated !== pathAResult.finalSize
-                  ? ` (capped to ${pathAResult.finalSize} active transactions)`
-                  : ''}
-              </p>
-            )}
-
-            {path === 'pathB' && pathB && (
-              <p className="lead-inline">
-                Tier {pathB.tier}: {(pathB.coveragePercent * 100).toFixed(0)}% coverage
-                rule, floor {formatMoney(pathB.minimumRequired)}. Provisional top-value
-                items suggest {pathB.suggestedSampleSize} items covering{' '}
-                {formatMoney(pathB.provisionalCoverageValue)}.
-              </p>
-            )}
-
-            <label htmlFor="confirmedSize">Confirmed sample size</label>
-            <input
-              id="confirmedSize"
-              type="number"
-              min={1}
-              max={activePop.length}
-              value={confirmedSize}
-              onChange={(e) => updateConfirmedSize(Number(e.target.value))}
-            />
-
-            <label htmlFor="sizeRationale">Sample-size rationale</label>
-            <textarea
-              id="sizeRationale"
-              rows={3}
-              value={sizeRationale}
-              onChange={(e) => updateSizeRationale(e.target.value)}
-            />
-
-            {confirmedSize < minimumFloor && confirmedSize < activePop.length && (
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={reviewerApproved}
-                  onChange={(e) => updateReviewerApproved(e.target.checked)}
-                />
-                <span>
-                  Reviewer approves reduction below the minimum item floor (
-                  {minimumFloor}).
-                </span>
-              </label>
-            )}
-
-            {sizeWarning && <div className="banner warn">{sizeWarning}</div>}
-
-            {isHundredPercent && (
-              <div className="banner warn">
-                This will be treated as 100% examination, not sample-based testing.
+            <div className="stat-grid">
+              <div>
+                <span>Residual items</span>
+                <strong>{residualForDesign.length}</strong>
               </div>
+              <div>
+                <span>Strata</span>
+                <strong>{strataRows.length}</strong>
+              </div>
+            </div>
+
+            <h3>Stratum summary</h3>
+            <div className="preview-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Stratum</th>
+                    <th>Count</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {strataRows.map((row) => (
+                    <tr key={row.key}>
+                      <td>{row.key}</td>
+                      <td>{row.count}</td>
+                      <td>{formatMoney(row.value)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="actions">
+              <button type="button" className="ghost" onClick={goBack}>
+                Back
+              </button>
+              <button type="button" className="primary" onClick={continueFromStratify}>
+                Continue to design
+              </button>
+            </div>
+          </section>
+        )}
+
+        {step === 'design' && (
+          <section className="card">
+            <div className="stat-grid">
+              <div>
+                <span>Residual count</span>
+                <strong>{residualForDesign.length}</strong>
+              </div>
+              <div>
+                <span>High-value (specific)</span>
+                <strong>{hvForDesign.length}</strong>
+              </div>
+              <div>
+                <span>Risk level</span>
+                <strong>{riskLevelLabel(designInputs.riskLevel)}</strong>
+              </div>
+              <div>
+                <span>Suggested size</span>
+                <strong>{sizeSuggestion.suggestedSize}</strong>
+              </div>
+            </div>
+
+            {residualForDesign.length === 0 ? (
+              <div className="banner warn">
+                No residual population — sampling design is not applicable. Continue to
+                document specific testing of high-value items only.
+              </div>
+            ) : (
+              <>
+                <h3>Recommended method</h3>
+                <p className="lead-inline">
+                  <strong>{methodLabel(methodRecommendation.recommended)}</strong>
+                </p>
+                <ul>
+                  {methodRecommendation.reasons.map((r) => (
+                    <li key={r}>{r}</li>
+                  ))}
+                </ul>
+
+                <label htmlFor="selectedMethod">Selected method</label>
+                <select
+                  id="selectedMethod"
+                  value={sampleDesign.selectedMethod}
+                  onChange={(e) =>
+                    updateDesignMethod(e.target.value as SelectionMethod)
+                  }
+                >
+                  <option value="random">Random</option>
+                  <option value="systematic">Systematic</option>
+                  <option value="haphazard">Haphazard / Manual</option>
+                  <option value="block">Block</option>
+                </select>
+
+                {sampleDesign.selectedMethod !== sampleDesign.recommendedMethod && (
+                  <>
+                    <label htmlFor="methodOverride">Method override reason</label>
+                    <textarea
+                      id="methodOverride"
+                      rows={2}
+                      value={sampleDesign.methodOverrideReason}
+                      onChange={(e) => {
+                        invalidateFrom('design')
+                        setSampleDesign((prev) => ({
+                          ...prev,
+                          methodOverrideReason: e.target.value,
+                        }))
+                      }}
+                    />
+                  </>
+                )}
+
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={sampleDesign.methodApproved}
+                    onChange={(e) => {
+                      invalidateFrom('design')
+                      setSampleDesign((prev) => ({
+                        ...prev,
+                        methodApproved: e.target.checked,
+                      }))
+                    }}
+                  />
+                  <span>I approve the selected selection method for this engagement.</span>
+                </label>
+
+                <h3>Sample size</h3>
+                <p className="lead-inline">{sizeSuggestion.ruleLabel}</p>
+
+                {smallHighRiskBand && (
+                  <>
+                    <label htmlFor="coveragePct">
+                      Coverage % (small pop, high risk:{' '}
+                      {Math.round(SMALL_POP_HIGH_RISK_MIN_PCT * 100)}–
+                      {Math.round(SMALL_POP_HIGH_RISK_MAX_PCT * 100)}%)
+                    </label>
+                    <input
+                      id="coveragePct"
+                      type="range"
+                      min={Math.round(SMALL_POP_HIGH_RISK_MIN_PCT * 100)}
+                      max={Math.round(SMALL_POP_HIGH_RISK_MAX_PCT * 100)}
+                      step={1}
+                      value={Math.round(coveragePercentOverride * 100)}
+                      onChange={(e) => {
+                        invalidateFrom('design')
+                        const pct = Number(e.target.value) / 100
+                        setCoveragePercentOverride(pct)
+                        const next = suggestResidualSampleSize({
+                          residualCount: residualForDesign.length,
+                          riskLevel: designInputs.riskLevel,
+                          coveragePercentOverride: pct,
+                        })
+                        setSampleDesign((prev) => ({
+                          ...prev,
+                          suggestedSize: next.suggestedSize,
+                          confirmedSize: next.suggestedSize,
+                          coveragePercentUsed: next.coveragePercent,
+                        }))
+                      }}
+                    />
+                    <p className="hint">
+                      {Math.round(coveragePercentOverride * 100)}% of residual
+                    </p>
+                  </>
+                )}
+
+                <label htmlFor="confirmedSize">Confirmed residual sample size</label>
+                <input
+                  id="confirmedSize"
+                  type="number"
+                  min={1}
+                  max={Math.max(1, residualForDesign.length)}
+                  value={sampleDesign.confirmedSize}
+                  onChange={(e) => {
+                    invalidateFrom('design')
+                    setSampleDesign((prev) => ({
+                      ...prev,
+                      confirmedSize: Number(e.target.value),
+                    }))
+                    setSizeWarning('')
+                  }}
+                />
+
+                <label htmlFor="sizeRationale">Size rationale</label>
+                <textarea
+                  id="sizeRationale"
+                  rows={3}
+                  value={sampleDesign.sizeRationale}
+                  onChange={(e) => {
+                    invalidateFrom('design')
+                    setSampleDesign((prev) => ({
+                      ...prev,
+                      sizeRationale: e.target.value,
+                    }))
+                  }}
+                />
+
+                {sampleDesign.confirmedSize < sizeSuggestion.suggestedSize && (
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={sampleDesign.sizeReviewerApproved}
+                      onChange={(e) => {
+                        invalidateFrom('design')
+                        setSampleDesign((prev) => ({
+                          ...prev,
+                          sizeReviewerApproved: e.target.checked,
+                        }))
+                      }}
+                    />
+                    <span>
+                      Reviewer approves reduction below suggested residual coverage (
+                      {sizeSuggestion.suggestedSize}).
+                    </span>
+                  </label>
+                )}
+
+                {sizeWarning && <div className="banner warn">{sizeWarning}</div>}
+                {sizeSuggestion.isHundredPercent && (
+                  <div className="banner warn">
+                    Confirmed size equals the full residual — this is 100% examination of
+                    residual, not sample-based testing.
+                  </div>
+                )}
+
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={sampleDesign.samplingRiskAccepted}
+                    onChange={(e) => {
+                      invalidateFrom('design')
+                      setSampleDesign((prev) => ({
+                        ...prev,
+                        samplingRiskAccepted: e.target.checked,
+                      }))
+                    }}
+                  />
+                  <span>{SAMPLING_RISK_STATEMENT}</span>
+                </label>
+              </>
             )}
 
             <div className="actions">
               <button type="button" className="ghost" onClick={goBack}>
                 Back
               </button>
-              <button type="button" className="primary" onClick={confirmSampleSize}>
-                Confirm sample size
+              <button type="button" className="primary" onClick={continueFromDesign}>
+                Continue to selection
               </button>
             </div>
           </section>
@@ -1233,94 +2233,140 @@ export default function App() {
         {step === 'selection' && (
           <section className="card">
             <p className="lead-inline">
-              Select exactly {confirmedSize} of {activePop.length} active transactions.
+              Selection runs on the <strong>residual</strong> population only. High-value
+              items are listed separately for specific testing (not in the sample).
             </p>
 
-            <label htmlFor="method">Selection method</label>
-            <select
-              id="method"
-              value={method}
-              onChange={(e) => updateMethod(e.target.value as SelectionMethod)}
-            >
-              <option value="random">Random</option>
-              <option value="systematic">Systematic</option>
-              <option value="haphazard">Haphazard / Manual</option>
-              <option value="block">Block</option>
-            </select>
-
-            {method !== DEFAULT_SELECTION_METHOD && (
-              <>
-                <label htmlFor="methodReason">
-                  Reason for changing from the default method (Random)
-                </label>
-                <textarea
-                  id="methodReason"
-                  rows={2}
-                  value={methodChangeReason}
-                  onChange={(e) => setMethodChangeReason(e.target.value)}
-                />
-              </>
-            )}
-
-            {method === 'systematic' && (
-              <div className="banner warn">
-                Systematic selection may follow a periodicity pattern in the ledger.
-                Review for pattern risk.
+            <div className="stat-grid">
+              <div>
+                <span>Residual</span>
+                <strong>{residualForDesign.length}</strong>
               </div>
-            )}
+              <div>
+                <span>Sample size</span>
+                <strong>{sampleDesign.confirmedSize}</strong>
+              </div>
+              <div>
+                <span>Method</span>
+                <strong>{methodLabel(sampleDesign.selectedMethod)}</strong>
+              </div>
+              <div>
+                <span>HV specific items</span>
+                <strong>{hvForDesign.length}</strong>
+              </div>
+            </div>
 
-            {method === 'block' && (
+            {hvForDesign.length > 0 && (
               <>
-                <label htmlFor="blockStart">Block start row (0-based, active list)</label>
-                <input
-                  id="blockStart"
-                  type="number"
-                  min={0}
-                  max={Math.max(0, activePop.length - confirmedSize)}
-                  value={blockStart}
-                  onChange={(e) => setBlockStart(Number(e.target.value))}
-                />
-                <label htmlFor="blockRationale">Rationale for block selection</label>
-                <textarea
-                  id="blockRationale"
-                  rows={2}
-                  value={blockRationale}
-                  onChange={(e) => setBlockRationale(e.target.value)}
-                />
-                <div className="banner warn">
-                  Block selection concentrates risk. Rationale is required.
+                <h3>High-value — specific testing (not sampled)</h3>
+                <div className="preview-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Voucher</th>
+                        <th>Coverage</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hvForDesign.map((t) => (
+                        <tr key={`hv-sel-${t.id}`}>
+                          <td>{t.id}</td>
+                          <td>{t.voucherNo || t.accountNo || '—'}</td>
+                          <td>{formatMoney(t.coverageAmount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </>
             )}
 
-            {method === 'haphazard' && (
+            {residualForDesign.length === 0 ? (
+              <div className="banner warn">
+                No residual items to sample. Continue to record specific testing of
+                high-value items.
+              </div>
+            ) : (
               <>
-                <label className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={haphazardBiasConfirmed}
-                    onChange={(e) => setHaphazardBiasConfirmed(e.target.checked)}
-                  />
-                  <span>I confirm this selection was made without conscious bias.</span>
-                </label>
-                <p className="lead-inline">
-                  Select exactly {confirmedSize} items ({haphazardIds.length} selected).
-                </p>
-                <div className="pick-list">
-                  {activePop.map((t) => (
-                    <label key={t.id} className="pick-item">
+                {sampleDesign.selectedMethod === 'systematic' && (
+                  <div className="banner warn">
+                    Systematic selection may follow a periodicity pattern. Review for
+                    pattern risk.
+                  </div>
+                )}
+
+                {sampleDesign.selectedMethod === 'block' && (
+                  <>
+                    <label htmlFor="blockStart">
+                      Block start index (0-based in residual list)
+                    </label>
+                    <input
+                      id="blockStart"
+                      type="number"
+                      min={0}
+                      max={Math.max(
+                        0,
+                        residualForDesign.length - sampleDesign.confirmedSize,
+                      )}
+                      value={blockStart}
+                      onChange={(e) => {
+                        invalidateFrom('selection')
+                        setBlockStart(Number(e.target.value))
+                      }}
+                    />
+                    <label htmlFor="blockRationale">Rationale for block selection</label>
+                    <textarea
+                      id="blockRationale"
+                      rows={2}
+                      value={blockRationale}
+                      onChange={(e) => {
+                        invalidateFrom('selection')
+                        setBlockRationale(e.target.value)
+                      }}
+                    />
+                  </>
+                )}
+
+                {sampleDesign.selectedMethod === 'haphazard' && (
+                  <>
+                    <label className="check-row">
                       <input
                         type="checkbox"
-                        checked={haphazardIds.includes(t.id)}
-                        onChange={() => toggleHaphazard(t.id)}
+                        checked={haphazardBiasConfirmed}
+                        onChange={(e) => {
+                          invalidateFrom('selection')
+                          setHaphazardBiasConfirmed(e.target.checked)
+                        }}
                       />
                       <span>
-                        {t.id} · {t.accountNo || t.voucherNo || 'No ref'} ·{' '}
-                        {formatMoney(t.coverageAmount)}
+                        I confirm this selection was made without conscious bias.
                       </span>
                     </label>
-                  ))}
-                </div>
+                    <p className="lead-inline">
+                      Select exactly {sampleDesign.confirmedSize} residual items (
+                      {haphazardIds.length} selected).
+                    </p>
+                    <div className="pick-list">
+                      {residualForDesign.map((t) => (
+                        <label key={t.id} className="pick-item">
+                          <input
+                            type="checkbox"
+                            checked={haphazardIds.includes(t.id)}
+                            onChange={() => toggleHaphazard(t.id)}
+                          />
+                          <span>
+                            {t.id} · {t.voucherNo || t.accountNo || 'No ref'} ·{' '}
+                            {formatMoney(t.coverageAmount)}
+                            {t.stratumKey && t.stratumKey !== 'all'
+                              ? ` · ${t.stratumKey}`
+                              : ''}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
               </>
             )}
 
@@ -1329,7 +2375,9 @@ export default function App() {
                 Back
               </button>
               <button type="button" className="primary" onClick={runSelection}>
-                Select {confirmedSize} items
+                {residualForDesign.length === 0
+                  ? 'Continue without sample'
+                  : `Select ${sampleDesign.confirmedSize} residual items`}
               </button>
             </div>
           </section>
@@ -1339,102 +2387,135 @@ export default function App() {
           <section className="card">
             <div className="stat-grid">
               <div>
-                <span>Selected</span>
+                <span>Sample selected</span>
                 <strong>{selected.length}</strong>
               </div>
               <div>
-                <span>Selected coverage</span>
+                <span>Sample coverage</span>
                 <strong>{formatMoney(selectedCoverage)}</strong>
               </div>
-              {path === 'pathB' && coverageTotal > 0 && (
-                <div>
-                  <span>Coverage achieved</span>
-                  <strong>
-                    {((selectedCoverage / coverageTotal) * 100).toFixed(1)}%
-                  </strong>
-                </div>
-              )}
               <div>
-                <span>Exceptions so far</span>
-                <strong>{testing.filter((t) => t.exception).length}</strong>
+                <span>HV specific items</span>
+                <strong>{hvForDesign.length}</strong>
+              </div>
+              <div>
+                <span>HV coverage</span>
+                <strong>{formatMoney(hvCoverage)}</strong>
               </div>
             </div>
 
+            <h3>Residual sample testing</h3>
+            {selected.length === 0 ? (
+              <p className="lead-inline">No residual sample items selected.</p>
+            ) : (
+              <div className="preview-table-wrap preview-table-all">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Voucher</th>
+                      <th>Coverage</th>
+                      <th>Tested</th>
+                      <th>Exception</th>
+                      <th>Exception value</th>
+                      <th>Nature</th>
+                      <th>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selected.map((t) => {
+                      const row = testing.find((x) => x.transactionId === t.id)
+                      return (
+                        <tr key={`test-${t.id}`}>
+                          <td>{t.id}</td>
+                          <td>{t.voucherNo || t.accountNo || '—'}</td>
+                          <td>{formatMoney(t.coverageAmount)}</td>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={row?.tested ?? false}
+                              onChange={(e) =>
+                                updateTesting(t.id, { tested: e.target.checked })
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={row?.exception ?? false}
+                              onChange={(e) =>
+                                updateTesting(t.id, { exception: e.target.checked })
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              value={row?.exceptionValue ?? 0}
+                              onChange={(e) =>
+                                updateTesting(t.id, {
+                                  exceptionValue: Number(e.target.value),
+                                })
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              value={row?.nature ?? ''}
+                              onChange={(e) =>
+                                updateTesting(t.id, { nature: e.target.value })
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              value={row?.notes ?? ''}
+                              onChange={(e) =>
+                                updateTesting(t.id, { notes: e.target.value })
+                              }
+                            />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <h3>High-value — specific testing (separately)</h3>
             <div className="preview-table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>ID</th>
-                    <th>Account</th>
+                    <th>Date</th>
                     <th>Voucher</th>
+                    <th>Description</th>
                     <th>Coverage</th>
-                    <th>Exception?</th>
-                    <th>Exception value</th>
-                    <th>Notes</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {selected.map((item) => {
-                    const row = testing.find((t) => t.transactionId === item.id)
-                    if (!row) return null
-                    return (
-                      <tr key={item.id}>
-                        <td>{item.id}</td>
-                        <td>{item.accountNo || '—'}</td>
-                        <td>{item.voucherNo || '—'}</td>
-                        <td>{formatMoney(item.coverageAmount)}</td>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={row.exception}
-                            onChange={(e) =>
-                              setTesting((prev) =>
-                                prev.map((t) =>
-                                  t.transactionId === item.id
-                                    ? { ...t, exception: e.target.checked, tested: true }
-                                    : t,
-                                ),
-                              )
-                            }
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="number"
-                            value={row.exceptionValue}
-                            onChange={(e) =>
-                              setTesting((prev) =>
-                                prev.map((t) =>
-                                  t.transactionId === item.id
-                                    ? { ...t, exceptionValue: Number(e.target.value) }
-                                    : t,
-                                ),
-                              )
-                            }
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={row.notes}
-                            onChange={(e) =>
-                              setTesting((prev) =>
-                                prev.map((t) =>
-                                  t.transactionId === item.id
-                                    ? { ...t, notes: e.target.value, nature: e.target.value }
-                                    : t,
-                                ),
-                              )
-                            }
-                          />
-                        </td>
+                  {hvForDesign.length === 0 ? (
+                    <tr>
+                      <td colSpan={5}>No high-value specific-testing items.</td>
+                    </tr>
+                  ) : (
+                    hvForDesign.map((t) => (
+                      <tr key={`hv-test-${t.id}`}>
+                        <td>{t.id}</td>
+                        <td>{t.date || '—'}</td>
+                        <td>{t.voucherNo || t.accountNo || '—'}</td>
+                        <td>{t.description || '—'}</td>
+                        <td>{formatMoney(t.coverageAmount)}</td>
                       </tr>
-                    )
-                  })}
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
 
-            <label htmlFor="natureSummary">Nature of exceptions (summary)</label>
+            <label htmlFor="natureSummary">Nature of exceptions summary</label>
             <textarea
               id="natureSummary"
               rows={2}
@@ -1444,32 +2525,16 @@ export default function App() {
               }
             />
 
-            <div className="grid-3">
+            <div className="form-grid grid-3">
               <div>
-                <label htmlFor="furtherTesting">Further testing required?</label>
-                <select
-                  id="furtherTesting"
-                  value={evaluation.furtherTesting}
-                  onChange={(e) =>
-                    setEvaluation((prev) => ({
-                      ...prev,
-                      furtherTesting: e.target.value as 'yes' | 'no',
-                    }))
-                  }
-                >
-                  <option value="no">No</option>
-                  <option value="yes">Yes</option>
-                </select>
-              </div>
-              <div>
-                <label htmlFor="widerIssue">Indicative of a wider issue?</label>
+                <label htmlFor="widerIssue">Wider issue indicated?</label>
                 <select
                   id="widerIssue"
                   value={evaluation.widerIssue}
                   onChange={(e) =>
                     setEvaluation((prev) => ({
                       ...prev,
-                      widerIssue: e.target.value as 'yes' | 'no' | 'unclear',
+                      widerIssue: e.target.value as EvaluationState['widerIssue'],
                     }))
                   }
                 >
@@ -1478,12 +2543,28 @@ export default function App() {
                   <option value="unclear">Unclear</option>
                 </select>
               </div>
+              <div>
+                <label htmlFor="furtherTesting">Further testing?</label>
+                <select
+                  id="furtherTesting"
+                  value={evaluation.furtherTesting}
+                  onChange={(e) =>
+                    setEvaluation((prev) => ({
+                      ...prev,
+                      furtherTesting: e.target.value as EvaluationState['furtherTesting'],
+                    }))
+                  }
+                >
+                  <option value="no">No</option>
+                  <option value="yes">Yes</option>
+                </select>
+              </div>
             </div>
 
-            <label htmlFor="conclusion">Auditor conclusion</label>
+            <label htmlFor="conclusion">Auditor conclusion (required)</label>
             <textarea
               id="conclusion"
-              rows={3}
+              rows={4}
               value={evaluation.conclusion}
               onChange={(e) =>
                 setEvaluation((prev) => ({ ...prev, conclusion: e.target.value }))
@@ -1496,26 +2577,12 @@ export default function App() {
               rows={2}
               value={evaluation.reviewerComments}
               onChange={(e) =>
-                setEvaluation((prev) => ({ ...prev, reviewerComments: e.target.value }))
+                setEvaluation((prev) => ({
+                  ...prev,
+                  reviewerComments: e.target.value,
+                }))
               }
             />
-
-            {path === 'pathB' && (
-              <>
-                <label htmlFor="remainder">Untested remainder basis</label>
-                <textarea
-                  id="remainder"
-                  rows={2}
-                  value={evaluation.untestedRemainderBasis}
-                  onChange={(e) =>
-                    setEvaluation((prev) => ({
-                      ...prev,
-                      untestedRemainderBasis: e.target.value,
-                    }))
-                  }
-                />
-              </>
-            )}
 
             <div className="actions">
               <button type="button" className="ghost" onClick={goBack}>
@@ -1529,223 +2596,417 @@ export default function App() {
         )}
 
         {step === 'workingPaper' && (
-          <section className="card paper">
-            <div className="paper-actions">
+          <section className="card working-paper">
+            <div className="actions">
               <button type="button" className="ghost" onClick={() => window.print()}>
-                Print / Export
+                Print
               </button>
-              <button type="button" className="primary" onClick={resetAll}>
+              <button type="button" className="ghost" onClick={resetAll}>
                 New engagement
               </button>
             </div>
 
-            <article className="working-paper">
-              <h2>Non-Statistical Audit Sampling Working Paper</h2>
+            <h2>Non-Statistical Audit Sampling — Working Paper</h2>
+            <p>
+              Tool version {TOOL_VERSION}
+              {configSnapshot ? ` · Config captured ${configSnapshot.capturedAt}` : ''}
+            </p>
 
-              <div className="wp-grid">
-                <p>
-                  <strong>WP reference:</strong> {engagement.wpReference || '—'}
-                </p>
-                <p>
-                  <strong>Client:</strong> {engagement.clientName || '—'}
-                </p>
-                <p>
-                  <strong>Audit area:</strong> {engagement.auditArea || '—'}
-                </p>
-                <p>
-                  <strong>Period:</strong> {engagement.period || '—'}
-                </p>
-                <p>
-                  <strong>Tool version:</strong> {TOOL_VERSION}
-                </p>
-                <p>
-                  <strong>Source file:</strong> {ledger?.fileName} / {sheet?.name}
-                </p>
-              </div>
+            <h3>Header</h3>
+            <p>
+              <strong>WP reference:</strong> {engagement.wpReference || '—'}
+              <br />
+              <strong>Client:</strong> {engagement.clientName || '—'}
+              <br />
+              <strong>Audit area:</strong> {engagement.auditArea || '—'}
+              <br />
+              <strong>Period:</strong> {engagement.period || '—'}
+            </p>
 
-              <p>
-                <strong>Audit objective:</strong> {objective}
-              </p>
-              <p>
-                <strong>Sampling unit:</strong> {samplingUnit}
-              </p>
+            <h3>Objective & assertions</h3>
+            <p>
+              <strong>Objective:</strong> {engagement.objective || '—'}
+              <br />
+              <strong>Test type:</strong> {engagement.testType || '—'}
+              <br />
+              <strong>Assertion:</strong> {engagement.assertion || '—'}
+              <br />
+              <strong>Sampling unit:</strong> {engagement.samplingUnit || '—'}
+              <br />
+              <strong>Error definition:</strong> {engagement.errorDefinition || '—'}
+              <br />
+              <strong>Risk level:</strong> {riskLevelLabel(designInputs.riskLevel)}
+            </p>
 
-              <h3>Population</h3>
-              <p>
-                <strong>Header row:</strong> {headerRow + 1} (auto-detected) ·{' '}
-                <strong>Data rows used:</strong> {dataStart + 1}–{dataEnd + 1}
-              </p>
-              <p>
-                <strong>Total rows built:</strong> {transactions.length} ·{' '}
-                <strong>Active transactions:</strong> {activePop.length} ·{' '}
-                <strong>Excluded:</strong> {transactions.length - activePop.length}
-              </p>
-              <p>
-                <strong>Total coverage value (active):</strong> {formatMoney(coverageTotal)}
-              </p>
+            <h3>Population source</h3>
+            <p>
+              <strong>File:</strong> {ledger?.fileName || '—'}
+              <br />
+              <strong>File hash:</strong> {ledger?.fileHash || '—'}
+              <br />
+              <strong>Extracted data hash:</strong> {dataHash}
+              <br />
+              <strong>Worksheet:</strong>{' '}
+              {ledger?.sheets[sheetIndex]?.name || '—'} (header row {headerRow + 1})
+            </p>
 
-              <h3>Sample size</h3>
-              <p>
-                <strong>Path:</strong>{' '}
-                {path === 'pathA' ? 'Path A — Risk score model' : 'Path B — Value coverage rule'}
-              </p>
-              {path === 'pathA' && (
-                <p>
-                  Risk {pathA.riskLevel}, Expected error {pathA.expectedError}, Other
-                  evidence {pathA.otherEvidence} → score {pathAResult.score}, calculated
-                  size {pathAResult.calculated}
-                </p>
-              )}
-              {path === 'pathB' && pathB && (
-                <p>
-                  Tier {pathB.tier}, coverage rule {(pathB.coveragePercent * 100).toFixed(0)}
-                  %, required coverage {formatMoney(pathB.requiredCoverageValue)}, minimum
-                  floor {formatMoney(pathB.minimumRequired)}
-                </p>
-              )}
-              <p>
-                <strong>Confirmed sample size:</strong> {confirmedSize}
-                {isHundredPercent ? ' (100% examination — not sample-based testing)' : ''}
-              </p>
-              <p>
-                <strong>Sample-size rationale:</strong> {sizeRationale}
-              </p>
-              {reviewerApproved && (
-                <p>
-                  <strong>Reviewer approval:</strong> Confirmed for reduction below the
-                  minimum item floor.
-                </p>
-              )}
+            <h3>Cleaning / exclusion summary</h3>
+            <p>
+              Original {summary.originalCount} ({formatMoney(summary.originalValue)}) →
+              cleaned {summary.cleanedCount} ({formatMoney(summary.cleanedValue)});
+              excluded {summary.excludedCount} ({formatMoney(summary.excludedValue)}).
+              Flags: totals {summary.flaggedTotals}, opening/closing{' '}
+              {summary.flaggedOpeningClosing}, zero/negative{' '}
+              {summary.flaggedZeroNegative}, duplicates {summary.flaggedDuplicates}{' '}
+              (not auto-excluded).
+            </p>
+            {summary.byReason.length > 0 && (
+              <ul>
+                {summary.byReason.map((r) => (
+                  <li key={r.reason}>
+                    {r.reason}: {r.count} ({formatMoney(r.value)})
+                  </li>
+                ))}
+              </ul>
+            )}
 
-              <h3>Selection</h3>
-              <p>
-                <strong>Method:</strong>{' '}
-                {selectionMeta ? methodLabel(selectionMeta.method) : methodLabel(method)}
-              </p>
-              {methodChangeReason && (
-                <p>
-                  <strong>Reason for method change:</strong> {methodChangeReason}
-                </p>
-              )}
-              {selectionMeta?.rationale && (
-                <p>
-                  <strong>Block rationale:</strong> {selectionMeta.rationale}
-                </p>
-              )}
-              {selectionMeta?.patternWarning && (
-                <p>
-                  <strong>Pattern note:</strong> {selectionMeta.patternWarning}
-                </p>
-              )}
-              {selectionMeta && (
-                <p>
-                  <strong>Reproducibility:</strong>{' '}
-                  {JSON.stringify({
-                    seed: selectionMeta.seed,
-                    rng: selectionMeta.rngAlgorithm,
-                    interval: selectionMeta.interval,
-                    start: selectionMeta.randomStart ?? selectionMeta.blockStart,
-                    biasConfirmed: selectionMeta.biasConfirmed,
-                    at: selectionMeta.timestamp,
-                    version: selectionMeta.toolVersion,
-                  })}
-                </p>
-              )}
-              <p>
-                <strong>Extracted-data hash:</strong> {dataHash}
-              </p>
+            <h3>Reconciliation summary</h3>
+            <p>
+              Control total {formatMoney(reconciliation.controlTotal)} from{' '}
+              {reconciliation.controlSource || '(source not recorded)'}. Difference{' '}
+              {formatMoney(reconciliation.difference)}. Reconciled:{' '}
+              {reconciliation.reconciled ? 'Yes' : 'No'}
+              {reconciliation.explanation
+                ? `. Explanation: ${reconciliation.explanation}`
+                : ''}
+              {reconciliation.reviewerApproved ? ' (reviewer approved).' : '.'}
+            </p>
 
-              <h3>Selected transactions ({selected.length})</h3>
+            <h3>High-value treatment</h3>
+            <p>
+              Threshold {formatMoney(designInputs.highValueThreshold)}. Basis:{' '}
+              {designInputs.highValueBasis}. Specific testing items:{' '}
+              {hvForDesign.length} ({formatMoney(hvCoverage)}). Residual:{' '}
+              {residualForDesign.length} ({formatMoney(residualCoverage)}).
+            </p>
+
+            <h3>Stratification summary (population design)</h3>
+            <p>
+              Basis: {designInputs.stratificationBasis}
+              {designInputs.stratificationBasis === 'other'
+                ? ` (${designInputs.stratificationOther || 'n/a'})`
+                : ''}
+              . Stratification is not a sampling method.
+            </p>
+            <ul>
+              {strataRows.map((r) => (
+                <li key={`wp-stratum-${r.key}`}>
+                  {r.key}: {r.count} ({formatMoney(r.value)})
+                </li>
+              ))}
+            </ul>
+
+            <h3>Sampling risk</h3>
+            <p>{SAMPLING_RISK_STATEMENT}</p>
+            <p>
+              Accepted: {sampleDesign.samplingRiskAccepted ? 'Yes' : 'No'}
+            </p>
+
+            <h3>Sample size rationale</h3>
+            <p>
+              Suggested {sampleDesign.suggestedSize}
+              {sampleDesign.coveragePercentUsed != null
+                ? ` (${Math.round(sampleDesign.coveragePercentUsed * 100)}% coverage)`
+                : ''}
+              ; confirmed {sampleDesign.confirmedSize}. Rationale:{' '}
+              {sampleDesign.sizeRationale || '—'}
+              {sampleDesign.sizeReviewerApproved
+                ? ' (size reduction reviewer-approved).'
+                : ''}
+            </p>
+
+            <h3>Selection method</h3>
+            <p>
+              Recommended: {methodLabel(sampleDesign.recommendedMethod)}. Selected:{' '}
+              {methodLabel(sampleDesign.selectedMethod)}. Method approved:{' '}
+              {sampleDesign.methodApproved ? 'Yes' : 'No'}
+              {sampleDesign.methodOverrideReason
+                ? `. Override reason: ${sampleDesign.methodOverrideReason}`
+                : ''}
+              .
+            </p>
+
+            <h3>Reproducibility details</h3>
+            {selectionMeta ? (
+              <p>
+                Method {methodLabel(selectionMeta.method)}; timestamp{' '}
+                {selectionMeta.timestamp}; tool {selectionMeta.toolVersion}; data hash{' '}
+                {selectionMeta.dataHash}
+                {selectionMeta.seed ? `; seed ${selectionMeta.seed}` : ''}
+                {selectionMeta.rngAlgorithm
+                  ? `; RNG ${selectionMeta.rngAlgorithm}`
+                  : ''}
+                {selectionMeta.interval != null
+                  ? `; interval ${selectionMeta.interval}`
+                  : ''}
+                {selectionMeta.randomStart != null
+                  ? `; random start ${selectionMeta.randomStart}`
+                  : ''}
+                {selectionMeta.blockStart != null
+                  ? `; block start ${selectionMeta.blockStart}`
+                  : ''}
+                {selectionMeta.sortBasis ? `; sort ${selectionMeta.sortBasis}` : ''}
+                {selectionMeta.patternWarning
+                  ? `. Warning: ${selectionMeta.patternWarning}`
+                  : ''}
+                .
+              </p>
+            ) : (
+              <p>No selection meta recorded.</p>
+            )}
+
+            <h3>Selected residual sample items</h3>
+            <div className="preview-table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>ID</th>
                     <th>Date</th>
-                    <th>Account</th>
                     <th>Voucher</th>
                     <th>Description</th>
-                    <th>Debit</th>
-                    <th>Credit</th>
                     <th>Coverage</th>
+                    <th>Stratum</th>
                     <th>Exception</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {selected.map((item) => {
-                    const row = testing.find((t) => t.transactionId === item.id)
-                    return (
-                      <tr key={item.id}>
-                        <td>{item.id}</td>
-                        <td>{item.date || '—'}</td>
-                        <td>{item.accountNo || '—'}</td>
-                        <td>{item.voucherNo || '—'}</td>
-                        <td>{item.description || '—'}</td>
-                        <td>{formatMoney(item.debit)}</td>
-                        <td>{formatMoney(item.credit)}</td>
-                        <td>{formatMoney(item.coverageAmount)}</td>
-                        <td>
-                          {row?.exception
-                            ? `Yes (${formatMoney(row.exceptionValue)}) ${row.notes}`
-                            : 'No'}
-                        </td>
-                      </tr>
-                    )
-                  })}
+                  {selected.length === 0 ? (
+                    <tr>
+                      <td colSpan={7}>None (no residual sample).</td>
+                    </tr>
+                  ) : (
+                    selected.map((t) => {
+                      const row = testing.find((x) => x.transactionId === t.id)
+                      return (
+                        <tr key={`wp-sel-${t.id}`}>
+                          <td>{t.id}</td>
+                          <td>{t.date || '—'}</td>
+                          <td>{t.voucherNo || '—'}</td>
+                          <td>{t.description || '—'}</td>
+                          <td>{formatMoney(t.coverageAmount)}</td>
+                          <td>{t.stratumKey || 'all'}</td>
+                          <td>
+                            {row?.exception
+                              ? `Yes (${formatMoney(row.exceptionValue)}) ${row.nature}`
+                              : 'No'}
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
                 </tbody>
               </table>
+            </div>
 
-              {path === 'pathB' && (
-                <>
-                  <h3>Untested remainder (Path B)</h3>
-                  <p>
-                    Selected coverage {formatMoney(selectedCoverage)} (
-                    {coverageTotal
-                      ? ((selectedCoverage / coverageTotal) * 100).toFixed(1)
-                      : '0'}
-                    %) of total active coverage {formatMoney(coverageTotal)}.
-                  </p>
-                  <p>
-                    Untested remainder value:{' '}
-                    {formatMoney(Math.max(coverageTotal - selectedCoverage, 0))}
-                  </p>
-                  <p>
-                    <strong>Basis for accepting untested remainder:</strong>{' '}
-                    {evaluation.untestedRemainderBasis}
-                  </p>
-                </>
-              )}
+            <h3>High-value list (specific testing)</h3>
+            <div className="preview-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Date</th>
+                    <th>Voucher</th>
+                    <th>Description</th>
+                    <th>Coverage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hvForDesign.length === 0 ? (
+                    <tr>
+                      <td colSpan={5}>None.</td>
+                    </tr>
+                  ) : (
+                    hvForDesign.map((t) => (
+                      <tr key={`wp-hv-${t.id}`}>
+                        <td>{t.id}</td>
+                        <td>{t.date || '—'}</td>
+                        <td>{t.voucherNo || '—'}</td>
+                        <td>{t.description || '—'}</td>
+                        <td>{formatMoney(t.coverageAmount)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
 
-              <h3>Testing &amp; evaluation</h3>
+            <h3>Evaluation</h3>
+            <p>
+              Exceptions: {evaluation.exceptionCount} (
+              {formatMoney(evaluation.exceptionValue)}). Wider issue:{' '}
+              {evaluation.widerIssue}. Further testing: {evaluation.furtherTesting}.
+            </p>
+            <p>
+              <strong>Conclusion:</strong> {evaluation.conclusion || '—'}
+            </p>
+            {evaluation.natureSummary && (
               <p>
-                Exceptions: {evaluation.exceptionCount} · Exception value:{' '}
-                {formatMoney(evaluation.exceptionValue)}
+                <strong>Nature summary:</strong> {evaluation.natureSummary}
               </p>
+            )}
+            {evaluation.reviewerComments && (
               <p>
-                <strong>Nature of exceptions:</strong> {evaluation.natureSummary || '—'}
+                <strong>Reviewer comments:</strong> {evaluation.reviewerComments}
               </p>
-              <p>
-                <strong>Further testing required:</strong>{' '}
-                {evaluation.furtherTesting === 'yes' ? 'Yes' : 'No'} ·{' '}
-                <strong>Wider issue indicated:</strong> {evaluation.widerIssue}
-              </p>
-              <p>
-                <strong>Conclusion:</strong> {evaluation.conclusion || '—'}
-              </p>
-              <p>
-                <strong>Reviewer comments:</strong> {evaluation.reviewerComments || '—'}
-              </p>
+            )}
 
-              <h3>Firm configuration snapshot</h3>
-              {configSnapshot && (
-                <pre className="config-json">
-                  {JSON.stringify(configSnapshot, null, 2)}
-                </pre>
-              )}
+            <h3>Prepared / reviewed by & lock</h3>
+            <div className="form-grid grid-3">
+              <div>
+                <label htmlFor="preparedBy">Prepared by</label>
+                <input
+                  id="preparedBy"
+                  value={signOff.preparedBy}
+                  disabled={signOff.locked}
+                  onChange={(e) =>
+                    setSignOff((prev) => ({
+                      ...prev,
+                      preparedBy: e.target.value,
+                      reviewStatus:
+                        prev.reviewStatus === 'draft' ? 'prepared' : prev.reviewStatus,
+                      preparedDate: prev.preparedDate || todayIsoDate(),
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <label htmlFor="preparedDate">Prepared date</label>
+                <input
+                  id="preparedDate"
+                  type="date"
+                  value={signOff.preparedDate}
+                  disabled={signOff.locked}
+                  onChange={(e) =>
+                    setSignOff((prev) => ({ ...prev, preparedDate: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <label htmlFor="reviewedBy">Reviewed by</label>
+                <input
+                  id="reviewedBy"
+                  value={signOff.reviewedBy}
+                  disabled={signOff.locked}
+                  onChange={(e) =>
+                    setSignOff((prev) => ({
+                      ...prev,
+                      reviewedBy: e.target.value,
+                      reviewStatus: e.target.value.trim()
+                        ? 'reviewed'
+                        : prev.preparedBy
+                          ? 'prepared'
+                          : 'draft',
+                      reviewedDate: prev.reviewedDate || todayIsoDate(),
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <label htmlFor="reviewedDate">Reviewed date</label>
+                <input
+                  id="reviewedDate"
+                  type="date"
+                  value={signOff.reviewedDate}
+                  disabled={signOff.locked}
+                  onChange={(e) =>
+                    setSignOff((prev) => ({ ...prev, reviewedDate: e.target.value }))
+                  }
+                />
+              </div>
+              <div>
+                <label htmlFor="reviewStatus">Review status</label>
+                <select
+                  id="reviewStatus"
+                  value={signOff.reviewStatus}
+                  disabled={signOff.locked}
+                  onChange={(e) =>
+                    setSignOff((prev) => ({
+                      ...prev,
+                      reviewStatus: e.target.value as SignOffState['reviewStatus'],
+                    }))
+                  }
+                >
+                  <option value="draft">draft</option>
+                  <option value="prepared">prepared</option>
+                  <option value="reviewed">reviewed</option>
+                  <option value="locked">locked</option>
+                </select>
+              </div>
+            </div>
 
-              <h3>Sign-off</h3>
-              <p>Prepared by: ______________________ Date: __________</p>
-              <p>Reviewed by: ______________________ Date: __________</p>
-            </article>
+            <p className="lead-inline">
+              File assembly guidance: lock within {FILE_ASSEMBLY_DEADLINE_DAYS} days of
+              the report date / period end (firm policy). Current deadline field:{' '}
+              {signOff.fileAssemblyDeadline || 'not set (set on lock)'}.
+            </p>
+
+            <label htmlFor="amendmentNote">Amendment note</label>
+            <textarea
+              id="amendmentNote"
+              rows={2}
+              value={signOff.amendmentNote}
+              onChange={(e) => {
+                const note = e.target.value
+                setSignOff((prev) => ({
+                  ...prev,
+                  amendmentNote: note,
+                  amendmentReviewerApproved:
+                    prev.locked && note !== prev.amendmentNote
+                      ? false
+                      : prev.amendmentReviewerApproved,
+                }))
+              }}
+            />
+            {signOff.locked && signOff.amendmentNote.trim() && (
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={signOff.amendmentReviewerApproved}
+                  onChange={(e) =>
+                    setSignOff((prev) => ({
+                      ...prev,
+                      amendmentReviewerApproved: e.target.checked,
+                    }))
+                  }
+                />
+                <span>
+                  Amendment reviewer approves changes after lock (required when
+                  amendment note is edited while locked).
+                </span>
+              </label>
+            )}
+
+            <p>
+              <strong>Lock status:</strong>{' '}
+              {signOff.locked
+                ? `Locked on ${signOff.lockDate || '—'}`
+                : 'Not locked'}
+            </p>
+
+            <div className="actions">
+              <button
+                type="button"
+                className="primary"
+                onClick={lockWorkingPaper}
+                disabled={
+                  signOff.locked &&
+                  !!signOff.amendmentNote.trim() &&
+                  !signOff.amendmentReviewerApproved
+                }
+              >
+                {signOff.locked ? 'Confirm lock / amendment' : 'Lock working paper'}
+              </button>
+            </div>
           </section>
         )}
       </main>

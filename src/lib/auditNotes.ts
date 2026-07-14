@@ -1,28 +1,25 @@
 /**
- * Implementation audit vs brief (source of truth)
+ * Implementation audit vs updated project brief (source of truth).
  *
- * ALREADY IN PLACE (partial/full):
- * - Upload → worksheet → auto header/data → mapping → confirm → objective → size → select → test → WP
- * - Header synonyms, normalization, fuzzy match, confidence
- * - Optional Account No + Amount alternative (product need; brief Debit/Credit primary)
- * - Coverage from Debit/Credit/Amount with absolute values
- * - Path A matrix and Path B tiers + provisional sizing + min item floor 15
- * - Random/systematic/haphazard/block selection
- * - Basic warnings (zeros, both sides, duplicates, totals, repeated headers)
- * - Printable working paper (partial fields)
+ * IMPLEMENTED:
+ * - Upload → worksheet → headers/mapping → clean → reconcile → planning
+ *   → high-value → stratify → design (method/size/risk) → selection → testing → WP
+ * - Flexible header mapping + positional fallback
+ * - Population cleaning flags (totals, opening/closing, zero/negative, duplicates)
+ * - Reconciliation with explanation + reviewer approval on difference
+ * - Full planning fields (test type, assertion, objective, unit, error definition)
+ * - High-value separation before residual sampling
+ * - Stratification as design only
+ * - Method recommendation with override rationale
+ * - Residual coverage guidance (≤30 high risk 60–70%; large-pop % by risk)
+ * - Sampling-risk acknowledgement statement
+ * - Reproducibility details per method
+ * - Working paper §17 fields + sign-off / lock / amendment
+ * - Firm config snapshot
  *
- * MISSING / WEAK (to implement now):
- * - Hard stops for unmapped required fields + alternative ID when Voucher No missing
- * - Multiple header candidates must not auto-finalize
- * - Data-type assisted mapping
- * - Both Debit+Credit requires auditor resolution (not silent max)
- * - Exclude/confirm repeated headers and questionable rows with reason
- * - Change invalidation clearing downstream state
- * - Override rules (increase/reduce/reviewer approval below floor)
- * - Method-change rationale; systematic/block warnings + block rationale
- * - Extracted data hash + firm config snapshot on WP
- * - Full evaluation fields + untested remainder completeness
- * - WP: client, period, area, WP ref, signed debit/credit, 100% wording
- * - Edge-case unit tests
+ * CONFIGURABLE (firmConfig.ts):
+ * - Audit areas, assertions, test types
+ * - HV default threshold, small-pop band, large-pop % by risk
+ * - File assembly deadline days
  */
 export const IMPLEMENTATION_AUDIT = true

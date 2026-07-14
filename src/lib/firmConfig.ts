@@ -1,44 +1,81 @@
-import { TOOL_VERSION, type FirmConfigSnapshot } from './types'
+import {
+  SAMPLING_RISK_STATEMENT,
+  TOOL_VERSION,
+  type FirmConfigSnapshot,
+  type RiskLevel,
+} from './types'
 
-export const RISK_SCORE_MATRIX = [
-  { min: 3, max: 3, size: 15 },
-  { min: 4, max: 5, size: 25 },
-  { min: 6, max: 7, size: 40 },
-  { min: 8, max: 9, size: 60 },
-  { min: 10, max: 12, size: 70 },
-] as const
+/** Residual count at or below this uses small-population coverage guidance. */
+export const SMALL_POPULATION_CUTOFF = 30
 
-export const VALUE_COVERAGE_TIERS = [
-  { tier: 1, maxInclusive: 500_000, percent: 1, minimumRequired: 0 },
-  { tier: 2, maxInclusive: 2_000_000, percent: 0.6, minimumRequired: 500_000 },
-  { tier: 3, maxInclusive: 10_000_000, percent: 0.4, minimumRequired: 1_200_000 },
-  {
-    tier: 4,
-    maxInclusive: null as number | null,
-    percent: 0.25,
-    minimumRequired: 4_000_000,
-  },
-] as const
+/** High-risk small population: 60–70% of residual (default 60%). */
+export const SMALL_POP_HIGH_RISK_MIN_PCT = 0.6
+export const SMALL_POP_HIGH_RISK_MAX_PCT = 0.7
+export const SMALL_POP_HIGH_RISK_DEFAULT_PCT = 0.6
 
-export const DEFAULT_MIN_ITEM_COUNT = 15
-export const HEADER_SYNONYMS_VERSION = '1.1.0'
+/** Large residual populations: default coverage % by risk (auditor may increase). */
+export const LARGE_POP_COVERAGE_BY_RISK: Record<RiskLevel, number> = {
+  low: 0.15,
+  medium: 0.25,
+  high: 0.4,
+  veryHigh: 0.5,
+}
+
+export const DEFAULT_HIGH_VALUE_THRESHOLD = 100_000
+
+export const HEADER_SYNONYMS_VERSION = '2.0.0'
 
 export const DEBIT_CREDIT_TREATMENT =
   'Coverage Amount = abs(Debit) if Credit blank/zero; abs(Credit) if Debit blank/zero; both populated requires auditor resolution; value coverage uses absolute amounts.'
 
+export const ASSERTION_OPTIONS = [
+  'Existence / Occurrence',
+  'Completeness',
+  'Accuracy / Valuation',
+  'Cutoff',
+  'Classification',
+  'Rights and obligations',
+  'Presentation and disclosure',
+]
+
+export const TEST_TYPE_OPTIONS = [
+  'Tests of details — vouching',
+  'Tests of details — tracing',
+  'Tests of details — other',
+  'Tests of controls (attribute)',
+]
+
+export const AUDIT_AREA_OPTIONS = [
+  'Expenses',
+  'Purchases',
+  'Sales / Revenue',
+  'Cash and bank',
+  'Trade receivables',
+  'Trade payables',
+  'Inventory',
+  'Fixed assets',
+  'Payroll',
+  'Other',
+]
+
+/** Days after period end used as default file-assembly lock deadline guidance. */
+export const FILE_ASSEMBLY_DEADLINE_DAYS = 60
+
 export function captureFirmConfigSnapshot(): FirmConfigSnapshot {
   return {
     toolVersion: TOOL_VERSION,
-    riskScoreMatrix: RISK_SCORE_MATRIX.map((r) => ({ ...r })),
-    valueCoverageTiers: VALUE_COVERAGE_TIERS.map((t) => ({
-      tier: t.tier,
-      maxInclusive: t.maxInclusive,
-      percent: t.percent,
-      minimumRequired: t.minimumRequired,
-    })),
-    minimumItemCount: DEFAULT_MIN_ITEM_COUNT,
+    highValueDefaultThreshold: DEFAULT_HIGH_VALUE_THRESHOLD,
+    smallPopulationCutoff: SMALL_POPULATION_CUTOFF,
+    smallPopHighRiskMinPct: SMALL_POP_HIGH_RISK_MIN_PCT,
+    smallPopHighRiskMaxPct: SMALL_POP_HIGH_RISK_MAX_PCT,
+    largePopCoverageByRisk: { ...LARGE_POP_COVERAGE_BY_RISK },
+    assertionOptions: [...ASSERTION_OPTIONS],
+    testTypeOptions: [...TEST_TYPE_OPTIONS],
+    auditAreaOptions: [...AUDIT_AREA_OPTIONS],
     headerSynonymsVersion: HEADER_SYNONYMS_VERSION,
     debitCreditTreatment: DEBIT_CREDIT_TREATMENT,
+    samplingRiskStatement: SAMPLING_RISK_STATEMENT,
+    fileAssemblyDeadlineDays: FILE_ASSEMBLY_DEADLINE_DAYS,
     capturedAt: new Date().toISOString(),
   }
 }

@@ -167,8 +167,16 @@ export function buildTransactions(params: {
         lowerDesc,
       )
 
+    const looksLikeOpeningClosing =
+      /opening balance|closing balance|balance b\/f|balance c\/f|brought forward|carried forward/i.test(
+        lowerDesc,
+      )
+
     if (looksLikeTotal) {
       warnings.push(`Row ${rowIndex + 1} looks like a total/subtotal row.`)
+    }
+    if (looksLikeOpeningClosing) {
+      warnings.push(`Row ${rowIndex + 1} looks like an opening/closing balance.`)
     }
     if (isRepeatedHeader) {
       warnings.push(`Row ${rowIndex + 1} may be a repeated header.`)
@@ -193,9 +201,14 @@ export function buildTransactions(params: {
     if (bothSidesWarning) bothSides += 1
     if (coverageAmount === 0) zeroCount += 1
 
+    const isZeroOrNegative =
+      coverageAmount === 0 || debitRaw < 0 || creditRaw < 0 || amountRaw < 0
+
     const idKey = voucherNo || accountNo
+    let isDuplicateVoucher = false
     if (idKey) {
       if (voucherSeen.has(idKey)) {
+        isDuplicateVoucher = true
         warnings.push(`Duplicate voucher/document/ID number: ${idKey}`)
       }
       voucherSeen.add(idKey)
@@ -225,10 +238,15 @@ export function buildTransactions(params: {
       needsCoverageResolution,
       isRepeatedHeader,
       looksLikeTotal,
-      excluded: isRepeatedHeader, // default exclude repeated headers; auditor can restore
+      looksLikeOpeningClosing,
+      isZeroOrNegative,
+      isDuplicateVoucher,
+      excluded: isRepeatedHeader,
       exclusionReason: isRepeatedHeader
         ? 'Auto-excluded: appears to be a repeated header row'
         : '',
+      highValue: false,
+      stratumKey: 'all',
       extras,
     })
   }

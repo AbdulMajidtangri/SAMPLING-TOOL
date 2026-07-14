@@ -1,8 +1,24 @@
 import * as XLSX from 'xlsx'
 import type { UploadedLedger, WorkbookSheet } from './types'
 
+async function hashFileBuffer(buffer: ArrayBuffer): Promise<string> {
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const digest = await crypto.subtle.digest('SHA-256', buffer)
+    const bytes = [...new Uint8Array(digest)]
+    return `sha256-${bytes.map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 16)}`
+  }
+  const view = new Uint8Array(buffer)
+  let h = 2166136261
+  for (let i = 0; i < view.length; i++) {
+    h ^= view[i]
+    h = Math.imul(h, 16777619)
+  }
+  return `fnv1a-${(h >>> 0).toString(16).padStart(8, '0')}`
+}
+
 export async function parseLedgerFile(file: File): Promise<UploadedLedger> {
   const buffer = await file.arrayBuffer()
+  const fileHash = await hashFileBuffer(buffer)
   const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
 
   const sheets: WorkbookSheet[] = workbook.SheetNames.map((name) => {
@@ -21,6 +37,7 @@ export async function parseLedgerFile(file: File): Promise<UploadedLedger> {
 
   return {
     fileName: file.name,
+    fileHash,
     sheets,
   }
 }

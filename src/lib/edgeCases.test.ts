@@ -8,7 +8,10 @@ import {
   suggestMappings,
   validateRequiredMappings,
 } from './headers'
-import { pathASampleSize, pathBSizing, validateSampleSizeOverride } from './sampleSize'
+import {
+  suggestResidualSampleSize,
+  validateSampleSizeOverride,
+} from './sampleSize'
 import { selectRandom, selectSystematic, selectBlock } from './selection'
 import type { LedgerTransaction, StandardField } from './types'
 
@@ -23,6 +26,32 @@ function mapOf(
     debit: entries.debit ?? null,
     credit: entries.credit ?? null,
     amount: entries.amount ?? null,
+  }
+}
+
+function tx(partial: Partial<LedgerTransaction> & Pick<LedgerTransaction, 'id' | 'coverageAmount'>): LedgerTransaction {
+  return {
+    rowIndex: 0,
+    date: '2024-01-01',
+    voucherNo: partial.id,
+    accountNo: '',
+    description: 'x',
+    debit: partial.coverageAmount,
+    credit: 0,
+    amountRaw: 0,
+    bothSidesWarning: false,
+    needsCoverageResolution: false,
+    isRepeatedHeader: false,
+    looksLikeTotal: false,
+    looksLikeOpeningClosing: false,
+    isZeroOrNegative: false,
+    isDuplicateVoucher: false,
+    excluded: false,
+    exclusionReason: '',
+    highValue: false,
+    stratumKey: 'all',
+    extras: {},
+    ...partial,
   }
 }
 
@@ -192,72 +221,38 @@ describe('coverage amount rules', () => {
   })
 })
 
-describe('Path A and Path B', () => {
-  it('Path A matrix scores', () => {
-    expect(pathASampleSize({ riskLevel: 1, expectedError: 1, otherEvidence: 1 }, 100).calculated).toBe(15)
-    expect(pathASampleSize({ riskLevel: 2, expectedError: 2, otherEvidence: 2 }, 100).calculated).toBe(40)
-    expect(pathASampleSize({ riskLevel: 4, expectedError: 4, otherEvidence: 4 }, 100).calculated).toBe(70)
-    expect(pathASampleSize({ riskLevel: 4, expectedError: 4, otherEvidence: 4 }, 20).finalSize).toBe(20)
+describe('residual sample size guidance', () => {
+  it('small high-risk population uses 60% default band', () => {
+    const r = suggestResidualSampleSize({
+      residualCount: 20,
+      riskLevel: 'high',
+    })
+    expect(r.coveragePercent).toBe(0.6)
+    expect(r.suggestedSize).toBe(12)
   })
 
-  it('Path B floor rule and min item count', () => {
-    const txs: LedgerTransaction[] = Array.from({ length: 20 }, (_, i) => ({
-      id: `R${i}`,
-      rowIndex: i,
-      date: '2024-01-01',
-      voucherNo: `V${i}`,
-      accountNo: '',
-      description: 'x',
-      debit: i === 0 ? 450_000 : 5_000,
-      credit: 0,
-      amountRaw: 0,
-      coverageAmount: i === 0 ? 450_000 : 5_000,
-      bothSidesWarning: false,
-      needsCoverageResolution: false,
-      isRepeatedHeader: false,
-      looksLikeTotal: false,
-      excluded: false,
-      exclusionReason: '',
-      extras: {},
-    }))
-    // total = 450k + 19*5k = 545,000 → tier 2, required max(327000, 500000)=500000
-    const result = pathBSizing(txs)
-    expect(result.tier).toBe(2)
-    expect(result.requiredCoverageValue).toBe(500_000)
-    expect(result.suggestedSampleSize).toBeGreaterThanOrEqual(15)
-    expect(result.suggestedSampleSize).not.toBe(1)
+  it('small high-risk allows 60–70% override', () => {
+    const r = suggestResidualSampleSize({
+      residualCount: 20,
+      riskLevel: 'veryHigh',
+      coveragePercentOverride: 0.7,
+    })
+    expect(r.coveragePercent).toBe(0.7)
+    expect(r.suggestedSize).toBe(14)
   })
 
-  it('Path B cliff example 510,000', () => {
-    const pop: LedgerTransaction[] = Array.from({ length: 51 }, (_, i) => ({
-      id: `P${i}`,
-      rowIndex: i,
-      date: '2024-01-01',
-      voucherNo: `V${i}`,
-      accountNo: '',
-      description: 'x',
-      debit: 10_000,
-      credit: 0,
-      amountRaw: 0,
-      coverageAmount: 10_000,
-      bothSidesWarning: false,
-      needsCoverageResolution: false,
-      isRepeatedHeader: false,
-      looksLikeTotal: false,
-      excluded: false,
-      exclusionReason: '',
-      extras: {},
-    }))
-    // 51 * 10k = 510k → tier 2 floor forces Rs. 500,000
-    const r = pathBSizing(pop)
-    expect(r.requiredCoverageValue).toBe(500_000)
+  it('large population uses risk coverage percent', () => {
+    const r = suggestResidualSampleSize({
+      residualCount: 100,
+      riskLevel: 'high',
+    })
+    expect(r.suggestedSize).toBe(40)
   })
 
-  it('override below floor needs reviewer approval', () => {
+  it('override below suggested size needs reviewer approval', () => {
     const blocked = validateSampleSizeOverride({
       proposed: 5,
       calculated: 25,
-      minimumFloor: 15,
       population: 100,
       rationale: 'Too many items for this small area of testing work.',
       reviewerApproved: false,
@@ -267,7 +262,6 @@ describe('Path A and Path B', () => {
     const allowed = validateSampleSizeOverride({
       proposed: 5,
       calculated: 25,
-      minimumFloor: 15,
       population: 100,
       rationale: 'Too many items for this small area of testing work.',
       reviewerApproved: true,
@@ -277,25 +271,9 @@ describe('Path A and Path B', () => {
 })
 
 describe('selection methods', () => {
-  const pop: LedgerTransaction[] = Array.from({ length: 40 }, (_, i) => ({
-    id: `R${i}`,
-    rowIndex: i,
-    date: '2024-01-01',
-    voucherNo: `V${i}`,
-    accountNo: '',
-    description: 'x',
-    debit: 1000,
-    credit: 0,
-    amountRaw: 0,
-    coverageAmount: 1000,
-    bothSidesWarning: false,
-    needsCoverageResolution: false,
-    isRepeatedHeader: false,
-    looksLikeTotal: false,
-    excluded: false,
-    exclusionReason: '',
-    extras: {},
-  }))
+  const pop: LedgerTransaction[] = Array.from({ length: 40 }, (_, i) =>
+    tx({ id: `R${i}`, rowIndex: i, voucherNo: `V${i}`, coverageAmount: 1000, debit: 1000 }),
+  )
 
   it('random selects exact size and stores seed/hash', () => {
     const { selected, meta } = selectRandom(pop, 15, 'seed-1')
@@ -343,5 +321,31 @@ describe('amount parsing via build', () => {
 describe('scoreHeaderMatch', () => {
   it('does not map Column 1 as voucher', () => {
     expect(scoreHeaderMatch('Column 1', 'voucherNo').confidence).toBe('none')
+  })
+})
+
+describe('high-value separation', () => {
+  it('separates items at or above threshold into specific-testing pool', async () => {
+    const { separateHighValue } = await import('./highValue')
+    const items = [
+      tx({ id: 'R1', coverageAmount: 50_000 }),
+      tx({ id: 'R2', coverageAmount: 150_000 }),
+      tx({ id: 'R3', coverageAmount: 100_000 }),
+    ]
+    const { highValue, residual } = separateHighValue(items, 100_000)
+    expect(highValue.map((t) => t.id).sort()).toEqual(['R2', 'R3'])
+    expect(residual.map((t) => t.id)).toEqual(['R1'])
+  })
+})
+
+describe('method recommendation', () => {
+  it('recommends a selection technique and never treats stratification as a method', async () => {
+    const { recommendMethod } = await import('./methodRecommend')
+    const pop = Array.from({ length: 50 }, (_, i) =>
+      tx({ id: `R${i}`, rowIndex: i, coverageAmount: 1000 + i * 10, debit: 1000 }),
+    )
+    const rec = recommendMethod({ residual: pop, riskLevel: 'high', highValueCount: 2 })
+    expect(['random', 'systematic', 'haphazard', 'block']).toContain(rec.recommended)
+    expect(rec.reasons.length).toBeGreaterThan(0)
   })
 })

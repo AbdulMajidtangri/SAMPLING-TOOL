@@ -2,6 +2,7 @@ export type WizardStep =
   | 'upload'
   | 'worksheet'
   | 'mapping'
+  | 'confirm'
   | 'planning'
   | 'design'
   | 'selection'
@@ -204,6 +205,7 @@ export interface EvaluationState {
   furtherTesting: 'yes' | 'no'
   conclusion: string
   reviewerComments: string
+  untestedRemainderBasis: string
 }
 
 export interface SignOffState {

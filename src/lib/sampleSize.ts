@@ -205,7 +205,40 @@ export function suggestSampleSizeForPath(params: {
   }
 }
 
-export function validateSampleSizeOverride(params: {
+export function pathBPostSelectionReview(params: {
+  population: LedgerTransaction[]
+  selected: LedgerTransaction[]
+  requiredCoverageValue: number
+}): {
+  selectedCount: number
+  selectedCoverage: number
+  populationCount: number
+  populationCoverage: number
+  coverageAchievedPercent: number
+  untestedCount: number
+  untestedValue: number
+  belowRequired: boolean
+} {
+  const { population, selected, requiredCoverageValue } = params
+  const populationCoverage = coverageSum(population)
+  const selectedCoverage = coverageSum(selected)
+  const selectedIds = new Set(selected.map((t) => t.id))
+  const untested = population.filter((t) => !selectedIds.has(t.id))
+  const untestedValue = coverageSum(untested)
+  const coverageAchievedPercent =
+    populationCoverage > 0 ? (selectedCoverage / populationCoverage) * 100 : 0
+
+  return {
+    selectedCount: selected.length,
+    selectedCoverage,
+    populationCount: population.length,
+    populationCoverage,
+    coverageAchievedPercent,
+    untestedCount: untested.length,
+    untestedValue,
+    belowRequired: selectedCoverage + 0.005 < requiredCoverageValue,
+  }
+}
   proposed: number
   calculated: number
   population: number

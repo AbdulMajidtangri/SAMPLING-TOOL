@@ -338,24 +338,29 @@ export function fillUnmappedByColumnOrder(
   return result
 }
 
-/** Soft checks only — mapping is optional; does not block continue. */
+/**
+ * Hard-stop checks for required column mapping (brief §7 / §28).
+ * Returns error messages — empty array means mapping is complete enough to continue.
+ */
 export function validateRequiredMappings(
   mapping: Record<StandardField, { columnIndex: number | null }>,
 ): string[] {
-  const warnings: string[] = []
+  const errors: string[] = []
 
   if (mapping.date.columnIndex == null) {
-    warnings.push('Date is not mapped. Columns will be used in order if you continue.')
+    errors.push(
+      'Date is required. Map the correct date column (if multiple dates exist, choose one).',
+    )
   }
   if (mapping.description.columnIndex == null) {
-    warnings.push('Description is not mapped.')
+    errors.push('Description is required.')
   }
 
   const hasVoucher = mapping.voucherNo.columnIndex != null
   const hasAltId = mapping.accountNo.columnIndex != null
   if (!hasVoucher && !hasAltId) {
-    warnings.push(
-      'Voucher No is not mapped. Map Voucher No or Account No, or rely on column order.',
+    errors.push(
+      'Voucher No is missing. Map Voucher No or an alternative unique ID field (e.g. Account No).',
     )
   }
 
@@ -364,11 +369,23 @@ export function validateRequiredMappings(
   const hasAmount = mapping.amount.columnIndex != null
   if (!(hasDebit && hasCredit) && !hasAmount) {
     if (!hasDebit && !hasCredit) {
-      warnings.push('Debit/Credit (or Amount) not mapped — column order will be used if possible.')
+      errors.push('Map Debit and Credit, or map a single Amount column.')
     } else {
-      warnings.push('Both Debit and Credit should be mapped (or use Amount instead).')
+      errors.push('Both Debit and Credit must be mapped (or use Amount instead).')
     }
   }
 
-  return warnings
+  return errors
+}
+
+/** Fields that still need an explicit auditor choice (multiple strong matches). */
+export function unresolvedAuditorChoices(
+  mapping: Record<StandardField, { columnIndex: number | null; needsAuditorChoice?: boolean }>,
+): StandardField[] {
+  return MAPPING_FIELD_ORDER.filter(
+    (field) =>
+      mapping[field].needsAuditorChoice === true ||
+      (mapping[field].columnIndex == null &&
+        (field === 'date' || field === 'voucherNo')),
+  )
 }

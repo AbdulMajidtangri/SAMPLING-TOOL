@@ -402,6 +402,25 @@ describe('amount parsing via build', () => {
   })
 })
 
+describe('trimSparseColumns', () => {
+  it('drops blank and duplicate header-only phantom columns', async () => {
+    const { trimSparseColumns } = await import('./excel')
+    const rows = [
+      ['', 'Account no.', 'Description', 'Debit (Rs.)', 'Credit (Rs.)', 'Debit (Rs.)', 'Credit (Rs.)'],
+      ['', '800', 'Fees', '', '100', '', ''],
+      ['', '801', 'Other', '', '200', '', ''],
+    ]
+    const trimmed = trimSparseColumns(rows)
+    expect(trimmed[0]).toEqual([
+      'Account no.',
+      'Description',
+      'Debit (Rs.)',
+      'Credit (Rs.)',
+    ])
+    expect(trimmed[1]).toEqual(['800', 'Fees', '', '100'])
+  })
+})
+
 describe('scoreHeaderMatch', () => {
   it('does not map Column 1 as voucher', () => {
     expect(scoreHeaderMatch('Column 1', 'voucherNo').confidence).toBe('none')

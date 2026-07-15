@@ -226,6 +226,19 @@ function addDaysIso(dateIso: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** Dropdown/chip label: show real ledger column position + header text. */
+function formatColumnLabel(index: number, header: string): string {
+  const name = header.trim() || `Column ${index + 1}`
+  return `Col ${index + 1}: ${name}`
+}
+
+/** ID shown in tables — prefer voucher; label account so it is not mistaken for voucher. */
+function displayRowId(t: { voucherNo: string; accountNo: string }): string {
+  if (t.voucherNo) return t.voucherNo
+  if (t.accountNo) return `Acct ${t.accountNo}`
+  return '—'
+}
+
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [step, setStep] = useState<WizardStep>('upload')
@@ -1282,6 +1295,12 @@ export default function App() {
                 field === 'date' && !dateHeaderPresent
                   ? DATE_OPTIONAL_LABEL
                   : STANDARD_FIELD_LABELS[field]
+              const uniqueCandidateHeaders = new Set(
+                state.candidates.map((c) => c.header.trim().toLowerCase()),
+              )
+              const showCandidateChips =
+                state.candidates.length > 1 &&
+                (state.needsAuditorChoice || uniqueCandidateHeaders.size > 1)
               return (
                 <div className="map-row" key={field}>
                   <div>
@@ -1309,12 +1328,12 @@ export default function App() {
                     >
                       <option value="">Not mapped</option>
                       {headers.map((header, index) => (
-                        <option key={`${header}-${index}`} value={index}>
-                          {header}
+                        <option key={`col-${index}`} value={index}>
+                          {formatColumnLabel(index, header)}
                         </option>
                       ))}
                     </select>
-                    {state.candidates.length > 1 && (
+                    {showCandidateChips && (
                       <div className="candidate-row">
                         {state.candidates.map((c) => (
                           <button
@@ -1325,7 +1344,8 @@ export default function App() {
                             }`}
                             onClick={() => updateMapping(field, c.columnIndex)}
                           >
-                            {c.header} ({Math.round(c.score)}%)
+                            {formatColumnLabel(c.columnIndex, c.header)} (
+                            {Math.round(c.score)}%)
                           </button>
                         ))}
                       </div>
@@ -1416,7 +1436,7 @@ export default function App() {
                     <thead>
                       <tr>
                         <th>ID</th>
-                        <th>Voucher</th>
+                        <th>Voucher / Acct</th>
                         <th>Debit</th>
                         <th>Credit</th>
                         <th>Action</th>
@@ -1426,7 +1446,7 @@ export default function App() {
                       {needingResolution.map((t) => (
                         <tr key={`resolve-${t.id}`}>
                           <td>{t.id}</td>
-                          <td>{t.voucherNo || t.accountNo || '—'}</td>
+                          <td>{displayRowId(t)}</td>
                           <td>{formatMoney(t.debit)}</td>
                           <td>{formatMoney(t.credit)}</td>
                           <td>
@@ -1476,7 +1496,7 @@ export default function App() {
                   <tr>
                     <th>ID</th>
                     <th>Date</th>
-                    <th>Voucher</th>
+                    <th>Voucher / Acct</th>
                     <th>Description</th>
                     <th>Coverage</th>
                     <th>Flags</th>
@@ -1488,7 +1508,7 @@ export default function App() {
                     <tr key={`confirm-${t.id}`} className={t.excluded ? 'excluded-row' : ''}>
                       <td>{t.id}</td>
                       <td>{t.date || '—'}</td>
-                      <td>{t.voucherNo || t.accountNo || '—'}</td>
+                      <td>{displayRowId(t)}</td>
                       <td>{t.description || '—'}</td>
                       <td>{formatMoney(t.coverageAmount)}</td>
                       <td>
@@ -2185,7 +2205,7 @@ export default function App() {
                         onChange={() => toggleHaphazard(t.id)}
                       />
                       <span>
-                        {t.id} · {t.voucherNo || t.accountNo || 'No ref'} ·{' '}
+                        {t.id} · {displayRowId(t)} ·{' '}
                         {formatMoney(t.coverageAmount)}
                       </span>
                     </label>
@@ -2266,7 +2286,7 @@ export default function App() {
                   <thead>
                     <tr>
                       <th>ID</th>
-                      <th>Voucher</th>
+                      <th>Voucher / Acct</th>
                       <th>Coverage</th>
                       <th>Tested</th>
                       <th>Exception</th>
@@ -2282,7 +2302,7 @@ export default function App() {
                       return (
                         <tr key={`test-${t.id}`}>
                           <td>{t.id}</td>
-                          <td>{t.voucherNo || t.accountNo || '—'}</td>
+                          <td>{displayRowId(t)}</td>
                           <td>{formatMoney(t.coverageAmount)}</td>
                           <td>
                             <input
@@ -2719,7 +2739,7 @@ export default function App() {
                   <tr>
                     <th>ID</th>
                     <th>Date</th>
-                    <th>Voucher</th>
+                    <th>Voucher / Acct</th>
                     <th>Description</th>
                     <th>Coverage</th>
                     <th>Exception</th>

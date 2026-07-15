@@ -20,8 +20,13 @@ export const SYNONYMS: Record<StandardField, string[]> = {
   voucherNo: [
     'voucherno',
     'vouchernumber',
+    'vouchernum',
+    'voucher',
     'vchno',
     'vch',
+    'vrno',
+    'vr',
+    'vno',
     'docno',
     'documentno',
     'refno',
@@ -282,6 +287,18 @@ export function suggestMappings(
     })
 
     candidates.sort((a, b) => b.score - a.score)
+
+    // Same header text on multiple columns (merged Excel cells) → keep best only
+    const collapsed: MappingCandidate[] = []
+    const seenHeader = new Set<string>()
+    for (const c of candidates) {
+      const key = normalizeHeader(c.header) || `col${c.columnIndex}`
+      if (seenHeader.has(key)) continue
+      seenHeader.add(key)
+      collapsed.push(c)
+    }
+    candidates.length = 0
+    candidates.push(...collapsed)
 
     // Multiple strong date-like matches → auditor must choose (Case 10)
     const strong = candidates.filter((c) => c.score >= 75)

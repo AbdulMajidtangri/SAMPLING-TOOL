@@ -9,12 +9,7 @@ import type {
 import { totalCoverageValue as coverageSum } from './coverage'
 import {
   DEFAULT_MIN_ITEM_COUNT,
-  LARGE_POP_COVERAGE_BY_RISK,
   RISK_SCORE_MATRIX,
-  SMALL_POP_HIGH_RISK_DEFAULT_PCT,
-  SMALL_POP_HIGH_RISK_MAX_PCT,
-  SMALL_POP_HIGH_RISK_MIN_PCT,
-  SMALL_POPULATION_CUTOFF,
   VALUE_COVERAGE_TIERS,
 } from './firmConfig'
 
@@ -47,14 +42,14 @@ export function scoreLabel(score: RiskScore, kind: keyof PathAInputs): string {
 }
 
 /**
- * Path A — risk matrix sample size.
- * For populations ≤30 at high/very-high risk, also apply 60–70% count coverage
- * (default 60%) and take the higher of matrix vs coverage count.
+ * Path A — risk matrix sample size only (§12).
+ * Score = risk + expected error + other evidence → matrix size, capped at population.
+ * Does not mix Path B / count-coverage % rules.
  */
 export function pathASampleSize(
   inputs: PathAInputs,
   transactionCount: number,
-  coveragePercentOverride?: number | null,
+  _coveragePercentOverride?: number | null,
 ): {
   score: number
   matrixSize: number
@@ -68,50 +63,21 @@ export function pathASampleSize(
   const score = inputs.riskLevel + inputs.expectedError + inputs.otherEvidence
   const row = RISK_SCORE_MATRIX.find((r) => score >= r.min && score <= r.max)
   const matrixSize = row?.size ?? 15
-
-  let coverageSize: number | null = null
-  let coveragePercent: number | null = null
-  let ruleLabel = `Path A risk matrix (score ${score}) → ${matrixSize} items`
-
-  const highRisk = inputs.riskLevel >= 3
-  if (transactionCount > 0 && transactionCount <= SMALL_POPULATION_CUTOFF && highRisk) {
-    coveragePercent =
-      coveragePercentOverride != null
-        ? Math.min(
-            SMALL_POP_HIGH_RISK_MAX_PCT,
-            Math.max(SMALL_POP_HIGH_RISK_MIN_PCT, coveragePercentOverride),
-          )
-        : SMALL_POP_HIGH_RISK_DEFAULT_PCT
-    coverageSize = Math.max(1, Math.ceil(transactionCount * coveragePercent))
-    ruleLabel = `Path A: matrix ${matrixSize}; small-pop high-risk coverage ${Math.round(coveragePercent * 100)}% → ${coverageSize}. Using higher of the two.`
-  } else if (transactionCount > SMALL_POPULATION_CUTOFF) {
-    const level: RiskLevel =
-      inputs.riskLevel === 1
-        ? 'low'
-        : inputs.riskLevel === 2
-          ? 'medium'
-          : inputs.riskLevel === 3
-            ? 'high'
-            : 'veryHigh'
-    coveragePercent = LARGE_POP_COVERAGE_BY_RISK[level]
-    coverageSize = Math.max(1, Math.ceil(transactionCount * coveragePercent))
-    ruleLabel = `Path A: matrix ${matrixSize}; large-pop ${Math.round(coveragePercent * 100)}% → ${coverageSize}. Using higher of the two (capped at population).`
-  }
-
-  const calculated = Math.min(
-    transactionCount,
-    Math.max(matrixSize, coverageSize ?? 0),
-  )
-  const finalSize = Math.min(calculated, transactionCount)
+  const finalSize =
+    transactionCount > 0 ? Math.min(matrixSize, transactionCount) : 0
 
   return {
     score,
     matrixSize,
-    coverageSize,
-    calculated,
+    coverageSize: null,
+    calculated: finalSize,
     finalSize,
-    coveragePercent,
-    ruleLabel,
+    coveragePercent: null,
+    ruleLabel: `Path A risk matrix (score ${score}) → ${matrixSize} items${
+      transactionCount > 0 && matrixSize > transactionCount
+        ? ` (capped at population ${transactionCount})`
+        : ''
+    }`,
     isHundredPercent: transactionCount > 0 && finalSize === transactionCount,
   }
 }

@@ -25,7 +25,7 @@
  * CONFIGURABLE (firmConfig.ts):
  * - Audit areas, assertions, test types
  * - HV default threshold (retained in firm config / DesignInputs defaults; not a wizard step)
- * - Small-pop band, large-pop % by risk
+ * - Path A risk-score matrix; Path B value-coverage tiers
  * - File assembly deadline days
  */
 export const IMPLEMENTATION_AUDIT = true

@@ -29,7 +29,7 @@ npm test
 
 ## Sample size — two paths
 
-- **Path A (risk matrix):** risk + expected error + other evidence → firm matrix size. For ≤30 high-risk populations, also apply **60–70%** count coverage (default 60%) and take the higher result.
+- **Path A (risk matrix):** risk + expected error + other evidence → firm matrix size (capped at population). Coverage % rules are not mixed into Path A.
 - **Path B (value coverage):** monetary tier % of population value → suggested item count. Selection method still chooses *which* items. Blocked when total coverage value is zero. After selection, coverage vs required is reviewed (§13.8); shortfalls need size increase / re-run or documented acceptance.
 
 Auditor picks the path at Planning. Sample size is confirmed before item selection. No statistical confidence levels are calculated.

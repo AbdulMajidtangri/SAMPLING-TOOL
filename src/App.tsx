@@ -34,9 +34,6 @@ import {
   AUDIT_AREA_OPTIONS,
   DEFAULT_HIGH_VALUE_THRESHOLD,
   FILE_ASSEMBLY_DEADLINE_DAYS,
-  SMALL_POP_HIGH_RISK_DEFAULT_PCT,
-  SMALL_POP_HIGH_RISK_MAX_PCT,
-  SMALL_POP_HIGH_RISK_MIN_PCT,
   TEST_TYPE_OPTIONS,
   captureFirmConfigSnapshot,
 } from './lib/firmConfig'
@@ -268,9 +265,6 @@ export default function App() {
   const [sampleDesign, setSampleDesign] = useState<SampleDesignState>(
     defaultSampleDesign(),
   )
-  const [coveragePercentOverride, setCoveragePercentOverride] = useState(
-    SMALL_POP_HIGH_RISK_DEFAULT_PCT,
-  )
   const [sizeWarning, setSizeWarning] = useState('')
 
   const [blockStart, setBlockStart] = useState(0)
@@ -327,21 +321,15 @@ export default function App() {
   )
 
   const sizeSuggestion = useMemo(() => {
-    const allowBand =
-      designInputs.sampleSizePath === 'pathA' &&
-      activePop.length <= 30 &&
-      designInputs.pathA.riskLevel >= 3
     return suggestSampleSizeForPath({
       path: designInputs.sampleSizePath,
       pathA: designInputs.pathA,
       transactions: activePop,
-      coveragePercentOverride: allowBand ? coveragePercentOverride : null,
     })
   }, [
     activePop,
     designInputs.sampleSizePath,
     designInputs.pathA,
-    coveragePercentOverride,
   ])
 
   const dateHeaderPresent = useMemo(
@@ -391,10 +379,6 @@ export default function App() {
   )
 
   const stepIndex = STEPS.indexOf(step)
-  const smallHighRiskBand =
-    designInputs.sampleSizePath === 'pathA' &&
-    activePop.length <= 30 &&
-    designInputs.pathA.riskLevel >= 3
 
   function pathBZeroCoverageError(): string | null {
     if (
@@ -438,7 +422,6 @@ export default function App() {
     }
     if (idx <= planningIdx) {
       setSampleDesign(defaultSampleDesign())
-      setCoveragePercentOverride(SMALL_POP_HIGH_RISK_DEFAULT_PCT)
       setSizeWarning('')
     }
     if (idx <= selectionIdx) {
@@ -749,15 +732,10 @@ export default function App() {
       riskLevel: riskForMethod,
       highValueCount: 0,
     })
-    const allowBand =
-      designInputs.sampleSizePath === 'pathA' &&
-      pop.length <= 30 &&
-      designInputs.pathA.riskLevel >= 3
     const suggestion = suggestSampleSizeForPath({
       path: designInputs.sampleSizePath,
       pathA: designInputs.pathA,
       transactions: pop,
-      coveragePercentOverride: allowBand ? coveragePercentOverride : null,
     })
     setSampleDesign({
       ...defaultSampleDesign(recommendation.recommended),
@@ -1061,7 +1039,6 @@ export default function App() {
     setEngagement(defaultEngagement())
     setDesignInputs(defaultDesignInputs())
     setSampleDesign(defaultSampleDesign())
-    setCoveragePercentOverride(SMALL_POP_HIGH_RISK_DEFAULT_PCT)
     setSizeWarning('')
     setBlockStart(0)
     setBlockRationale('')
@@ -1298,12 +1275,6 @@ export default function App() {
                 field === 'date' && !dateHeaderPresent
                   ? DATE_OPTIONAL_LABEL
                   : STANDARD_FIELD_LABELS[field]
-              const uniqueCandidateHeaders = new Set(
-                state.candidates.map((c) => c.header.trim().toLowerCase()),
-              )
-              const showCandidateChips =
-                state.candidates.length > 1 &&
-                (state.needsAuditorChoice || uniqueCandidateHeaders.size > 1)
               return (
                 <div className="map-row" key={field}>
                   <div>
@@ -1336,23 +1307,6 @@ export default function App() {
                         </option>
                       ))}
                     </select>
-                    {showCandidateChips && (
-                      <div className="candidate-row">
-                        {state.candidates.map((c) => (
-                          <button
-                            type="button"
-                            key={c.columnIndex}
-                            className={`candidate-chip ${
-                              state.columnIndex === c.columnIndex ? 'active' : ''
-                            }`}
-                            onClick={() => updateMapping(field, c.columnIndex)}
-                          >
-                            {formatColumnLabel(c.columnIndex, c.header)} (
-                            {Math.round(c.score)}%)
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
               )
@@ -1997,45 +1951,6 @@ export default function App() {
               </p>
             )}
 
-            {smallHighRiskBand && (
-              <>
-                <label htmlFor="coveragePct">
-                  Coverage % (small pop, high risk:{' '}
-                  {Math.round(SMALL_POP_HIGH_RISK_MIN_PCT * 100)}–
-                  {Math.round(SMALL_POP_HIGH_RISK_MAX_PCT * 100)}%)
-                </label>
-                <input
-                  id="coveragePct"
-                  type="range"
-                  min={Math.round(SMALL_POP_HIGH_RISK_MIN_PCT * 100)}
-                  max={Math.round(SMALL_POP_HIGH_RISK_MAX_PCT * 100)}
-                  step={1}
-                  value={Math.round(coveragePercentOverride * 100)}
-                  onChange={(e) => {
-                    invalidateFrom('design')
-                    const pct = Number(e.target.value) / 100
-                    setCoveragePercentOverride(pct)
-                    const next = suggestSampleSizeForPath({
-                      path: 'pathA',
-                      pathA: designInputs.pathA,
-                      transactions: activePop,
-                      coveragePercentOverride: pct,
-                    })
-                    setSampleDesign((prev) => ({
-                      ...prev,
-                      suggestedSize: next.suggestedSize,
-                      confirmedSize: next.suggestedSize,
-                      coveragePercentUsed: next.coveragePercent,
-                      sizeRuleLabel: next.ruleLabel,
-                    }))
-                  }}
-                />
-                <p className="hint">
-                  {Math.round(coveragePercentOverride * 100)}% of population
-                </p>
-              </>
-            )}
-
             <label htmlFor="confirmedSize">Confirmed sample size</label>
             <input
               id="confirmedSize"
@@ -2081,7 +1996,7 @@ export default function App() {
                   }}
                 />
                 <span>
-                  Reviewer approves reduction below suggested population coverage (
+                  Reviewer approves reduction below suggested size (
                   {sizeSuggestion.suggestedSize}).
                 </span>
               </label>

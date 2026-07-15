@@ -251,33 +251,57 @@ describe('coverage amount rules', () => {
 })
 
 describe('sample size paths', () => {
-  it('Path A: small high-risk applies 60% coverage band vs matrix', () => {
+  it('Path A: uses risk matrix only (no coverage % mix)', () => {
     const r = pathASampleSize(
       { riskLevel: 3, expectedError: 2, otherEvidence: 2 },
-      20,
+      218,
     )
-    // matrix score 7 → 40, but pop is 20 so capped; coverage 60% of 20 = 12; max(40,12)=40 → cap 20
-    expect(r.coveragePercent).toBe(0.6)
-    expect(r.coverageSize).toBe(12)
-    expect(r.finalSize).toBe(20)
+    // score 7 → matrix 40; population 218 does not change matrix result
+    expect(r.score).toBe(7)
+    expect(r.matrixSize).toBe(40)
+    expect(r.coverageSize).toBeNull()
+    expect(r.finalSize).toBe(40)
   })
 
-  it('Path A: small high-risk allows 60–70% override', () => {
+  it('Path A: caps matrix size at population', () => {
     const r = pathASampleSize(
-      { riskLevel: 4, expectedError: 1, otherEvidence: 1 },
+      { riskLevel: 4, expectedError: 4, otherEvidence: 4 },
       20,
-      0.7,
     )
-    expect(r.coveragePercent).toBe(0.7)
-    expect(r.coverageSize).toBe(14)
+    // score 12 → matrix 70, capped at 20
+    expect(r.matrixSize).toBe(70)
+    expect(r.finalSize).toBe(20)
+    expect(r.isHundredPercent).toBe(true)
   })
 
-  it('Path A: large population uses matrix and count coverage', () => {
+  it('Path A: score bands match §12 matrix', () => {
+    expect(
+      pathASampleSize({ riskLevel: 1, expectedError: 1, otherEvidence: 1 }, 100)
+        .finalSize,
+    ).toBe(15)
+    expect(
+      pathASampleSize({ riskLevel: 2, expectedError: 2, otherEvidence: 1 }, 100)
+        .finalSize,
+    ).toBe(25)
+    expect(
+      pathASampleSize({ riskLevel: 3, expectedError: 2, otherEvidence: 2 }, 100)
+        .finalSize,
+    ).toBe(40)
+    expect(
+      pathASampleSize({ riskLevel: 3, expectedError: 3, otherEvidence: 3 }, 100)
+        .finalSize,
+    ).toBe(60)
+    expect(
+      pathASampleSize({ riskLevel: 4, expectedError: 4, otherEvidence: 4 }, 100)
+        .finalSize,
+    ).toBe(70)
+  })
+
+  it('Path A: large population uses matrix only (not % of count)', () => {
     const r = pathASampleSize(
       { riskLevel: 3, expectedError: 2, otherEvidence: 2 },
       100,
     )
-    // score 7 → matrix 40; high risk large pop 40% → 40; final 40
     expect(r.finalSize).toBe(40)
   })
 

@@ -115,6 +115,14 @@ export function scoreHeaderMatch(
     return { score: 0, confidence: 'none' }
   }
 
+  // Never map Credit↔Debit across each other (debitrs ≈ creditrs by edit distance)
+  if (field === 'debit' && normalized.includes('credit')) {
+    return { score: 0, confidence: 'none' }
+  }
+  if (field === 'credit' && normalized.includes('debit')) {
+    return { score: 0, confidence: 'none' }
+  }
+
   const synonyms = SYNONYMS[field]
   if (synonyms.includes(normalized)) {
     return { score: 100, confidence: 'high' }
@@ -122,6 +130,11 @@ export function scoreHeaderMatch(
 
   let best = 0
   for (const synonym of synonyms) {
+    // Short tokens (dr/cr) must be exact — avoid "cr" matching inside "description"
+    if (synonym.length <= 2) {
+      if (normalized === synonym) best = Math.max(best, 100)
+      continue
+    }
     if (normalized.includes(synonym) || synonym.includes(normalized)) {
       best = Math.max(best, 82)
     }

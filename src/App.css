@@ -48,6 +48,11 @@
   padding: 40px 24px;
 }
 
+.stage-document {
+  max-width: none;
+  padding: 24px 24px 48px;
+}
+
 .upload-screen {
   width: min(560px, 100%);
   text-align: center;
@@ -97,6 +102,12 @@
   border-radius: 16px;
   padding: 22px;
   box-shadow: var(--shadow);
+  margin-bottom: 16px;
+}
+
+.card.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(39, 97, 214, 0.14), var(--shadow);
 }
 
 .file-name {
@@ -498,6 +509,10 @@ tr.header-row {
   justify-content: flex-end;
   gap: 10px;
   margin-bottom: 16px;
+}
+
+.working-paper {
+  background: #fffdf8;
 }
 
 .working-paper h2,

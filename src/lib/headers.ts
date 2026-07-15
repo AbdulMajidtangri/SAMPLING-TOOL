@@ -132,6 +132,26 @@ export function scoreHeaderMatch(
   return { score: best, confidence: 'none' }
 }
 
+/** Clear date-column name (avoids weak fuzzy hits like Voucher No ≈ voucherdate). */
+export function isClearDateHeader(header: string): boolean {
+  if (!header.trim()) return false
+  const normalized = normalizeHeader(header)
+  if (!normalized || normalized.startsWith('column')) return false
+
+  const synonyms = SYNONYMS.date
+  if (synonyms.includes(normalized)) return true
+  if (normalized.includes('date') || normalized === 'data') return true
+
+  return scoreHeaderMatch(header, 'date').confidence === 'high'
+}
+
+/**
+ * True when any header is clearly a date column.
+ */
+export function hasDateLikeHeader(headers: string[]): boolean {
+  return headers.some((header) => isClearDateHeader(header))
+}
+
 function columnLooksLikeDates(values: string[]): boolean {
   let hits = 0
   for (const v of values) {
@@ -222,6 +242,9 @@ export function suggestMappings(
 
     headers.forEach((header, index) => {
       if (!header.trim()) return
+      // Skip weak fuzzy date matches (e.g. Voucher No ≈ voucherdate)
+      if (field === 'date' && !isClearDateHeader(header)) return
+
       let match = scoreHeaderMatch(header, field)
       if (match.confidence === 'none') return
 
@@ -336,26 +359,6 @@ export function fillUnmappedByColumnOrder(
   }
 
   return result
-}
-
-/**
- * True when any header is clearly a date column.
- * Uses exact synonyms / "date" in the name / high-confidence match only —
- * not low fuzzy scores (e.g. "Voucher No" ≈ "voucherdate").
- */
-export function hasDateLikeHeader(headers: string[]): boolean {
-  return headers.some((header) => {
-    if (!header.trim()) return false
-    const normalized = normalizeHeader(header)
-    if (!normalized || normalized.startsWith('column')) return false
-
-    const synonyms = SYNONYMS.date
-    if (synonyms.includes(normalized)) return true
-    if (normalized.includes('date') || normalized === 'data') return true
-
-    const match = scoreHeaderMatch(header, 'date')
-    return match.confidence === 'high'
-  })
 }
 
 /**

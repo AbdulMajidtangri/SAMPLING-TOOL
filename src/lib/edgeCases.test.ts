@@ -178,13 +178,8 @@ describe('header edge cases', () => {
     const headers = ['Voucher No', 'Description', 'Debit', 'Credit']
     expect(hasDateLikeHeader(headers)).toBe(false)
     const m = suggestMappings(headers)
-    // Clear any weak false-positive date suggestion (e.g. Voucher No ≈ voucherdate)
-    m.date = {
-      columnIndex: null,
-      confidence: 'none',
-      candidates: [],
-      needsAuditorChoice: false,
-    }
+    expect(m.date.columnIndex).toBeNull()
+    expect(m.voucherNo.columnIndex).toBe(0)
     const errors = validateRequiredMappings(m, headers)
     expect(errors.some((e) => /Date/i.test(e))).toBe(false)
     expect(errors).toHaveLength(0)

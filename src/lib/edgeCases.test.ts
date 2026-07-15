@@ -403,12 +403,12 @@ describe('amount parsing via build', () => {
 })
 
 describe('trimSparseColumns', () => {
-  it('drops blank and duplicate header-only phantom columns', async () => {
+  it('drops blank and duplicate Debit/Credit columns (including dash placeholders)', async () => {
     const { trimSparseColumns } = await import('./excel')
     const rows = [
-      ['', 'Account no.', 'Description', 'Debit (Rs.)', 'Credit (Rs.)', 'Debit (Rs.)', 'Credit (Rs.)'],
-      ['', '800', 'Fees', '', '100', '', ''],
-      ['', '801', 'Other', '', '200', '', ''],
+      ['', 'Account no.', 'Description', 'Debit (Rs.)', 'Credit (Rs.)', 'Debit (Rs.)', 'Credit (Rs.)', 'Debit (Rs.)', 'Credit (Rs.)'],
+      ['', '800', 'Fees', '', '100', '-', '-', '', '100'],
+      ['', '801', 'Other', '', '200', '-', '-', '', '200'],
     ]
     const trimmed = trimSparseColumns(rows)
     expect(trimmed[0]).toEqual([

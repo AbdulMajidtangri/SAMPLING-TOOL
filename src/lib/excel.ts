@@ -18,38 +18,65 @@ async function hashFileBuffer(buffer: ArrayBuffer): Promise<string> {
 
 /**
  * Drop empty / phantom columns that Excel's used-range often invents
- * (blank col A, repeated Debit/Credit headers from merges with no data).
+ * (blank col A, repeated Debit/Credit from merges or wide used ranges).
  *
- * - Fully empty columns are removed.
- * - A column with only one non-empty cell is kept only if that text is not
- *   a duplicate of an earlier column (allows empty Debit/Credit sides).
+ * Uses the best header-like row to name columns, then keeps one column per
+ * unique header (the one with the most real data). Placeholder "-" is empty.
  */
 export function trimSparseColumns(rows: unknown[][]): unknown[][] {
   if (!rows.length) return rows
   const width = Math.max(0, ...rows.map((r) => (Array.isArray(r) ? r.length : 0)))
   if (width === 0) return rows
 
+  const isPlaceholder = (text: string) =>
+    !text || text === '-' || text === '—' || text === '–' || text === '.'
+
+  const hasReal = (value: unknown) => !isPlaceholder(cellToText(value))
+
   const counts = Array.from({ length: width }, () => 0)
-  const firstText = Array.from({ length: width }, () => '')
   for (const row of rows) {
     if (!Array.isArray(row)) continue
     for (let c = 0; c < width; c++) {
-      const text = cellToText(row[c])
-      if (!text) continue
-      counts[c] += 1
-      if (!firstText[c]) firstText[c] = text
+      if (hasReal(row[c])) counts[c] += 1
     }
   }
 
-  const claimed = new Set<string>()
-  const keepIdx: number[] = []
-  for (let c = 0; c < width; c++) {
-    if (counts[c] === 0) continue
-    const key = firstText[c].toLowerCase().replace(/[^a-z0-9]+/g, '')
-    if (counts[c] === 1 && key && claimed.has(key)) continue
-    keepIdx.push(c)
-    if (key) claimed.add(key)
+  const headerMarkers = ['account', 'description', 'debit', 'credit', 'voucher', 'date', 'narration']
+  let headerRowIdx = 0
+  let bestScore = -1
+  for (let r = 0; r < Math.min(rows.length, 30); r++) {
+    const row = rows[r]
+    if (!Array.isArray(row)) continue
+    let score = 0
+    for (let c = 0; c < width; c++) {
+      const n = cellToText(row[c]).toLowerCase().replace(/[^a-z0-9]+/g, '')
+      if (!n) continue
+      if (headerMarkers.some((m) => n.includes(m))) score += 1
+    }
+    if (score > bestScore) {
+      bestScore = score
+      headerRowIdx = r
+    }
   }
+
+  const headerCells = Array.isArray(rows[headerRowIdx]) ? rows[headerRowIdx] : []
+  const bestByKey = new Map<string, { index: number; count: number }>()
+
+  for (let c = 0; c < width; c++) {
+    if (counts[c] === 0 && !cellToText(headerCells[c])) continue
+    const headerText = cellToText(headerCells[c])
+    const key = headerText
+      ? headerText.toLowerCase().replace(/[^a-z0-9]+/g, '')
+      : `col${c}`
+    const prev = bestByKey.get(key)
+    if (!prev || counts[c] > prev.count || (counts[c] === prev.count && c < prev.index)) {
+      bestByKey.set(key, { index: c, count: counts[c] })
+    }
+  }
+
+  const keepIdx = [...bestByKey.values()]
+    .map((v) => v.index)
+    .sort((a, b) => a - b)
   if (keepIdx.length === 0) return rows
 
   return rows.map((row) => {

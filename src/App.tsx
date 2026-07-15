@@ -1256,18 +1256,21 @@ export default function App() {
                 </thead>
                 <tbody>
                   {sheet.rows
-                    .slice(headerRow, Math.min(headerRow + 5, sheet.rows.length))
-                    .map((row, i) => (
-                      <tr
-                        key={`map-preview-${headerRow + i}`}
-                        className={i === 0 ? 'header-row' : ''}
-                      >
-                        <td>{headerRow + i + 1}</td>
-                        {row.slice(0, 8).map((cell, j) => (
-                          <td key={`${i}-${j}`}>{cellToText(cell)}</td>
-                        ))}
-                      </tr>
-                    ))}
+                    .slice(
+                      Math.min(headerRow + 1, sheet.rows.length),
+                      Math.min(headerRow + 6, sheet.rows.length),
+                    )
+                    .map((row, i) => {
+                      const rowNum = headerRow + 1 + i
+                      return (
+                        <tr key={`map-preview-${rowNum}`}>
+                          <td>{rowNum + 1}</td>
+                          {row.slice(0, 8).map((cell, j) => (
+                            <td key={`${i}-${j}`}>{cellToText(cell)}</td>
+                          ))}
+                        </tr>
+                      )
+                    })}
                 </tbody>
               </table>
             </div>

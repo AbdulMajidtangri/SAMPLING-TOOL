@@ -69,6 +69,7 @@ import {
   TOOL_VERSION,
 } from './lib/types'
 import './App.css'
+import { MAIN_SCREEN_OPTIONS, type MainScreenId } from './lib/navigation'
 
 const STEPS: WizardStep[] = [
   'upload',
@@ -79,6 +80,7 @@ const STEPS: WizardStep[] = [
   'design',
   'selection',
   'testing',
+  'evaluation',
   'workingPaper',
 ]
 
@@ -91,6 +93,7 @@ const STEP_TITLES: Record<WizardStep, string> = {
   design: 'Method, size & sampling risk',
   selection: 'Generate sample',
   testing: 'Testing results',
+  evaluation: 'Evaluation',
   workingPaper: 'Working paper',
 }
 
@@ -238,6 +241,7 @@ function displayRowId(t: { voucherNo: string; accountNo: string }): string {
 
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [screen, setScreen] = useState<MainScreenId>('samplingWorkspace')
   const [step, setStep] = useState<WizardStep>('upload')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -1026,6 +1030,7 @@ export default function App() {
   }
 
   function resetAll() {
+    setScreen('samplingWorkspace')
     setStep('upload')
     setBusy(false)
     setError('')
@@ -1062,6 +1067,9 @@ export default function App() {
 
   const summary = populationSummary ?? liveSummary
 
+  const sectionClass = (section: WizardStep) =>
+    `card ${step === section ? 'is-active' : ''}`
+
   return (
     <div className="app-shell">
       {step !== 'upload' && (
@@ -1076,7 +1084,7 @@ export default function App() {
         </header>
       )}
 
-      <main className={`stage ${step === 'upload' ? 'stage-upload' : ''}`}>
+      <main className={`stage ${step === 'upload' ? 'stage-upload' : 'stage-document'}`}>
         {error && <div className="banner error">{error}</div>}
         {warnings.length > 0 && step !== 'upload' && (
           <div className="banner warn">
@@ -1117,8 +1125,8 @@ export default function App() {
           </section>
         )}
 
-        {step === 'worksheet' && ledger && (
-          <section className="card">
+        {step !== 'upload' && ledger && (
+          <section className={sectionClass('worksheet')}>
             <p className="file-name">{ledger.fileName}</p>
             <label htmlFor="sheet">Worksheet</label>
             <select
@@ -1143,8 +1151,8 @@ export default function App() {
           </section>
         )}
 
-        {step === 'mapping' && sheet && (
-          <section className="card">
+        {step !== 'upload' && sheet && (
+          <section className={sectionClass('mapping')}>
             <p className="lead-inline">
               Confirm the header row, data range, and required column mappings. Mapping
               is a required confirmation — continue is blocked until required fields are
@@ -1332,8 +1340,8 @@ export default function App() {
           </section>
         )}
 
-        {step === 'confirm' && (
-          <section className="card">
+        {step !== 'upload' && (
+          <section className={sectionClass('confirm')}>
             <div className="stat-grid">
               <div>
                 <span>Confirmed transaction count (active)</span>
@@ -1553,8 +1561,8 @@ export default function App() {
           </section>
         )}
 
-        {step === 'planning' && (
-          <section className="card">
+        {step !== 'upload' && (
+          <section className={sectionClass('planning')}>
             <p className="lead-inline">
               Complete planning inputs required for the working paper (hard stops).
             </p>
@@ -1849,8 +1857,8 @@ export default function App() {
           </section>
         )}
 
-        {step === 'design' && (
-          <section className="card">
+        {step !== 'upload' && (
+          <section className={sectionClass('design')}>
             <div className="stat-grid">
               <div>
                 <span>Population count</span>
@@ -2042,8 +2050,8 @@ export default function App() {
           </section>
         )}
 
-        {step === 'selection' && (
-          <section className="card">
+        {step !== 'upload' && (
+          <section className={sectionClass('selection')}>
             <p className="lead-inline">
               Selection runs on the active <strong>population</strong>.
             </p>
@@ -2147,8 +2155,8 @@ export default function App() {
           </section>
         )}
 
-        {step === 'testing' && (
-          <section className="card">
+        {step !== 'upload' && (
+          <section className={sectionClass('testing')}>
             <div className="stat-grid">
               <div>
                 <span>Sample selected</span>
@@ -2431,8 +2439,8 @@ export default function App() {
           </section>
         )}
 
-        {step === 'workingPaper' && (
-          <section className="card working-paper">
+        {step !== 'upload' && (
+          <section className={`card working-paper ${step === 'workingPaper' ? 'is-active' : ''}`}>
             <div className="actions">
               <button type="button" className="ghost" onClick={() => window.print()}>
                 Print

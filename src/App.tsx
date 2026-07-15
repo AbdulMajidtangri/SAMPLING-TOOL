@@ -4,17 +4,19 @@ import {
   buildTransactions,
   resolveTransactionCoverage,
   totalCoverageValue,
+  unresolvedBothSides,
 } from './lib/coverage'
 import { cellToText, parseLedgerFile } from './lib/excel'
 import {
   detectDataEnd,
   detectHeaderRow,
-  fillUnmappedByColumnOrder,
+  hasDateLikeHeader,
   suggestMappings,
   validateRequiredMappings,
 } from './lib/headers'
 import {
   formatMoney,
+  pathBPostSelectionReview,
   riskLevelLabel,
   scoreLabel,
   suggestSampleSizeForPath,
@@ -32,9 +34,6 @@ import {
   AUDIT_AREA_OPTIONS,
   DEFAULT_HIGH_VALUE_THRESHOLD,
   FILE_ASSEMBLY_DEADLINE_DAYS,
-  SMALL_POP_HIGH_RISK_DEFAULT_PCT,
-  SMALL_POP_HIGH_RISK_MAX_PCT,
-  SMALL_POP_HIGH_RISK_MIN_PCT,
   TEST_TYPE_OPTIONS,
   captureFirmConfigSnapshot,
 } from './lib/firmConfig'
@@ -42,6 +41,7 @@ import { recommendMethod } from './lib/methodRecommend'
 import { buildPopulationSummary } from './lib/populationSummary'
 import { hashExtractedData } from './lib/hash'
 import type {
+  CoverageResolution,
   DesignInputs,
   EngagementMeta,
   EvaluationState,
@@ -62,6 +62,7 @@ import type {
   WizardStep,
 } from './lib/types'
 import {
+  DATE_OPTIONAL_LABEL,
   MAPPING_FIELD_ORDER,
   SAMPLING_RISK_STATEMENT,
   STANDARD_FIELD_LABELS,
@@ -73,6 +74,7 @@ const STEPS: WizardStep[] = [
   'upload',
   'worksheet',
   'mapping',
+  'confirm',
   'planning',
   'design',
   'selection',
@@ -84,6 +86,7 @@ const STEP_TITLES: Record<WizardStep, string> = {
   upload: 'Upload ledger',
   worksheet: 'Choose worksheet',
   mapping: 'Headers & column mapping',
+  confirm: 'Confirm population',
   planning: 'Planning inputs',
   design: 'Method, size & sampling risk',
   selection: 'Generate sample',
@@ -96,6 +99,10 @@ const DEFAULT_SIZE_RATIONALE =
 const DEFAULT_SAMPLING_UNIT = 'Individual expense voucher / document'
 const DEFAULT_HIGH_VALUE_BASIS =
   'Absolute coverage amount at or above the stated threshold (specific testing, not sampling).'
+const DEFAULT_UNTESTED_REMAINDER_BASIS =
+  'Remainder accepted based on audit risk assessment and other audit procedures performed.'
+const PATH_B_BELOW_REQUIRED_WARNING =
+  'Path B §13.8: selected coverage is below the required coverage value. Increase sample size and re-run selection, or document reviewer-approved rationale before finishing testing.'
 
 function confidenceClass(confidence: MappingConfidence): string {
   return `confidence ${confidence}`
@@ -184,8 +191,11 @@ function defaultEvaluation(): EvaluationState {
     furtherTesting: 'no',
     conclusion: '',
     reviewerComments: '',
+    untestedRemainderBasis: DEFAULT_UNTESTED_REMAINDER_BASIS,
   }
 }
+
+type PathBReview = ReturnType<typeof pathBPostSelectionReview>
 
 function defaultSignOff(): SignOffState {
   return {
@@ -213,6 +223,19 @@ function addDaysIso(dateIso: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** Dropdown/chip label: show real ledger column position + header text. */
+function formatColumnLabel(index: number, header: string): string {
+  const name = header.trim() || `Column ${index + 1}`
+  return `Col ${index + 1}: ${name}`
+}
+
+/** ID shown in tables — prefer voucher; label account so it is not mistaken for voucher. */
+function displayRowId(t: { voucherNo: string; accountNo: string }): string {
+  if (t.voucherNo) return t.voucherNo
+  if (t.accountNo) return `Acct ${t.accountNo}`
+  return '—'
+}
+
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [step, setStep] = useState<WizardStep>('upload')
@@ -233,15 +256,14 @@ export default function App() {
   const [populationSummary, setPopulationSummary] = useState<PopulationSummary | null>(
     null,
   )
+  const [populationConfirmed, setPopulationConfirmed] = useState(false)
+  const [excludeDrafts, setExcludeDrafts] = useState<Record<string, string>>({})
 
   const [engagement, setEngagement] = useState<EngagementMeta>(defaultEngagement())
   const [designInputs, setDesignInputs] = useState<DesignInputs>(defaultDesignInputs())
 
   const [sampleDesign, setSampleDesign] = useState<SampleDesignState>(
     defaultSampleDesign(),
-  )
-  const [coveragePercentOverride, setCoveragePercentOverride] = useState(
-    SMALL_POP_HIGH_RISK_DEFAULT_PCT,
   )
   const [sizeWarning, setSizeWarning] = useState('')
 
@@ -252,6 +274,10 @@ export default function App() {
 
   const [selected, setSelected] = useState<LedgerTransaction[]>([])
   const [selectionMeta, setSelectionMeta] = useState<SelectionMeta | null>(null)
+  const [pathBReview, setPathBReview] = useState<PathBReview | null>(null)
+  const [pathBCoverageAccepted, setPathBCoverageAccepted] = useState(false)
+  const [pathBCoverageRationale, setPathBCoverageRationale] = useState('')
+  const [removeDrafts, setRemoveDrafts] = useState<Record<string, string>>({})
 
   const [testing, setTesting] = useState<TestingResult[]>([])
   const [evaluation, setEvaluation] = useState<EvaluationState>(defaultEvaluation())
@@ -295,39 +321,74 @@ export default function App() {
   )
 
   const sizeSuggestion = useMemo(() => {
-    const allowBand =
-      designInputs.sampleSizePath === 'pathA' &&
-      activePop.length <= 30 &&
-      designInputs.pathA.riskLevel >= 3
     return suggestSampleSizeForPath({
       path: designInputs.sampleSizePath,
       pathA: designInputs.pathA,
       transactions: activePop,
-      coveragePercentOverride: allowBand ? coveragePercentOverride : null,
     })
   }, [
     activePop,
     designInputs.sampleSizePath,
     designInputs.pathA,
-    coveragePercentOverride,
   ])
 
-  const mappingWarnings = useMemo(
-    () => (sheet ? validateRequiredMappings(mapping) : []),
-    [mapping, sheet],
+  const dateHeaderPresent = useMemo(
+    () => (sheet ? hasDateLikeHeader(headers) : false),
+    [headers, sheet],
+  )
+  const mappingErrors = useMemo(
+    () => (sheet ? validateRequiredMappings(mapping, headers) : []),
+    [mapping, sheet, headers],
   )
   const needsChoiceFields = useMemo(
     () => MAPPING_FIELD_ORDER.filter((f) => mapping[f].needsAuditorChoice),
     [mapping],
   )
+  const mappingBlocked =
+    mappingErrors.length > 0 ||
+    needsChoiceFields.length > 0 ||
+    MAPPING_FIELD_ORDER.some(
+      (f) => mapping[f].needsAuditorChoice === true && mapping[f].columnIndex == null,
+    )
 
   const selectedCoverage = useMemo(() => totalCoverageValue(selected), [selected])
+  const unresolvedCount = useMemo(
+    () => unresolvedBothSides(transactions),
+    [transactions],
+  )
+  const coverageTotal = useMemo(() => totalCoverageValue(transactions), [transactions])
+  const flaggedTotals = useMemo(
+    () => transactions.filter((t) => t.looksLikeTotal),
+    [transactions],
+  )
+  const flaggedOpening = useMemo(
+    () => transactions.filter((t) => t.looksLikeOpeningClosing),
+    [transactions],
+  )
+  const flaggedZeroNeg = useMemo(
+    () => transactions.filter((t) => t.isZeroOrNegative),
+    [transactions],
+  )
+  const flaggedDuplicates = useMemo(
+    () => transactions.filter((t) => t.isDuplicateVoucher),
+    [transactions],
+  )
+  const needingResolution = useMemo(
+    () => transactions.filter((t) => !t.excluded && t.needsCoverageResolution),
+    [transactions],
+  )
 
   const stepIndex = STEPS.indexOf(step)
-  const smallHighRiskBand =
-    designInputs.sampleSizePath === 'pathA' &&
-    activePop.length <= 30 &&
-    designInputs.pathA.riskLevel >= 3
+
+  function pathBZeroCoverageError(): string | null {
+    if (
+      designInputs.sampleSizePath === 'pathB' &&
+      totalCoverageValue(activePop) <= 0
+    ) {
+      return 'Path B cannot be used when total coverage value is zero.'
+    }
+    return null
+  }
 
   function goNext() {
     const next = STEPS[stepIndex + 1]
@@ -345,23 +406,31 @@ export default function App() {
    */
   function invalidateFrom(fromStep: WizardStep) {
     const idx = STEPS.indexOf(fromStep)
-    const mappingIdx = STEPS.indexOf('mapping')
+    const confirmIdx = STEPS.indexOf('confirm')
     const planningIdx = STEPS.indexOf('planning')
     const selectionIdx = STEPS.indexOf('selection')
     const testingIdx = STEPS.indexOf('testing')
 
-    if (idx <= mappingIdx) {
+    if (idx < confirmIdx) {
       setTransactions([])
       setPopulationSummary(null)
+      setPopulationConfirmed(false)
+      setExcludeDrafts({})
+    }
+    if (idx <= confirmIdx) {
+      setPopulationConfirmed(false)
     }
     if (idx <= planningIdx) {
       setSampleDesign(defaultSampleDesign())
-      setCoveragePercentOverride(SMALL_POP_HIGH_RISK_DEFAULT_PCT)
       setSizeWarning('')
     }
     if (idx <= selectionIdx) {
       setSelected([])
       setSelectionMeta(null)
+      setPathBReview(null)
+      setPathBCoverageAccepted(false)
+      setPathBCoverageRationale('')
+      setRemoveDrafts({})
     }
     if (idx < selectionIdx) {
       setBlockStart(0)
@@ -374,6 +443,8 @@ export default function App() {
       setEvaluation(defaultEvaluation())
       setConfigSnapshot(null)
       setSignOff(defaultSignOff())
+      setPathBCoverageAccepted(false)
+      setPathBCoverageRationale('')
     }
 
     setError('')
@@ -437,6 +508,30 @@ export default function App() {
     setError('')
   }
 
+  function applyDataStart(rowIndex: number) {
+    if (!sheet) return
+    if (rowIndex <= headerRow) {
+      setError('Data start must be after the header row.')
+      return
+    }
+    const end = Math.max(dataEnd, rowIndex)
+    invalidateFrom('mapping')
+    setDataStart(rowIndex)
+    setDataEnd(end)
+    setError('')
+  }
+
+  function applyDataEnd(rowIndex: number) {
+    if (!sheet) return
+    if (rowIndex < dataStart) {
+      setError('Data end must be on or after data start.')
+      return
+    }
+    invalidateFrom('mapping')
+    setDataEnd(rowIndex)
+    setError('')
+  }
+
   function updateMapping(field: StandardField, columnIndex: number | null) {
     invalidateFrom('mapping')
     setMapping((prev) => ({
@@ -453,13 +548,40 @@ export default function App() {
   function confirmMappingAndBuild() {
     if (!sheet) return
 
-    const headerTexts = (sheet.rows[headerRow] ?? []).map((c) => cellToText(c))
-    const resolved = fillUnmappedByColumnOrder(mapping, headerTexts.length)
-    setMapping(resolved)
+    if (dataStart <= headerRow) {
+      setError('Data start must be after the header row.')
+      return
+    }
+    if (dataEnd < dataStart) {
+      setError('Data end must be on or after data start.')
+      return
+    }
+
+    const errors = validateRequiredMappings(mapping, headers)
+    if (errors.length > 0) {
+      setError(errors[0])
+      return
+    }
+    if (needsChoiceFields.length > 0) {
+      setError(
+        `Confirm column choice for: ${needsChoiceFields
+          .map((f) => STANDARD_FIELD_LABELS[f])
+          .join(', ')}.`,
+      )
+      return
+    }
+    if (
+      MAPPING_FIELD_ORDER.some(
+        (f) => mapping[f].needsAuditorChoice === true && mapping[f].columnIndex == null,
+      )
+    ) {
+      setError('Resolve all fields that need auditor choice before continuing.')
+      return
+    }
 
     const mapIndexes = MAPPING_FIELD_ORDER.reduce(
       (acc, field) => {
-        acc[field] = resolved[field].columnIndex
+        acc[field] = mapping[field].columnIndex
         return acc
       },
       {} as Record<StandardField, number | null>,
@@ -478,20 +600,96 @@ export default function App() {
       return
     }
 
-    const resolvedTransactions = result.transactions.map((t) =>
-      t.needsCoverageResolution ? resolveTransactionCoverage(t, 'useMax') : t,
-    )
-    const active = activeTransactions(resolvedTransactions)
-    if (active.length === 0) {
-      setError('No active transactions remain after mapping. Check the worksheet and column mapping.')
-      return
-    }
-
+    // Keep needsCoverageResolution rows for auditor resolution on confirm step.
     invalidateFrom('mapping')
     setError('')
     setWarnings(result.warnings)
-    setTransactions(resolvedTransactions)
-    setPopulationSummary(buildPopulationSummary(resolvedTransactions))
+    setTransactions(result.transactions)
+    setPopulationSummary(buildPopulationSummary(result.transactions))
+    setPopulationConfirmed(false)
+    setExcludeDrafts({})
+    setStep('confirm')
+  }
+
+  function resolveRow(id: string, resolution: CoverageResolution) {
+    setTransactions((prev) => {
+      const next = prev.map((t) =>
+        t.id === id ? resolveTransactionCoverage(t, resolution) : t,
+      )
+      setPopulationSummary(buildPopulationSummary(next))
+      return next
+    })
+    invalidateFrom('confirm')
+    setPopulationConfirmed(false)
+    setError('')
+  }
+
+  function excludeRow(id: string) {
+    const reason = (excludeDrafts[id] ?? '').trim()
+    if (!reason) {
+      setError('Please enter a reason before excluding this row.')
+      return
+    }
+    setTransactions((prev) => {
+      const next = prev.map((t) =>
+        t.id === id ? { ...t, excluded: true, exclusionReason: reason } : t,
+      )
+      setPopulationSummary(buildPopulationSummary(next))
+      return next
+    })
+    setExcludeDrafts((prev) => ({ ...prev, [id]: '' }))
+    invalidateFrom('confirm')
+    setPopulationConfirmed(false)
+    setError('')
+  }
+
+  function restoreRow(id: string) {
+    setTransactions((prev) => {
+      const next = prev.map((t) => {
+        if (t.id !== id) return t
+        const both = Math.abs(t.debit) > 0 && Math.abs(t.credit) > 0
+        if (both && (!t.coverageResolution || t.coverageResolution === 'exclude')) {
+          return {
+            ...t,
+            excluded: false,
+            exclusionReason: '',
+            coverageResolution: undefined,
+            needsCoverageResolution: true,
+            coverageAmount: 0,
+            bothSidesWarning: true,
+          }
+        }
+        return {
+          ...t,
+          excluded: false,
+          exclusionReason: '',
+        }
+      })
+      setPopulationSummary(buildPopulationSummary(next))
+      return next
+    })
+    invalidateFrom('confirm')
+    setPopulationConfirmed(false)
+    setError('')
+  }
+
+  function continueFromConfirm() {
+    const unresolved = unresolvedBothSides(transactions)
+    if (unresolved > 0) {
+      setError(
+        `${unresolved} row(s) still need Debit/Credit resolution before continuing.`,
+      )
+      return
+    }
+    const active = activeTransactions(transactions)
+    if (active.length === 0) {
+      setError('No active transactions remain. Restore or fix rows before continuing.')
+      return
+    }
+    const summary = buildPopulationSummary(transactions)
+    setPopulationSummary(summary)
+    setPopulationConfirmed(true)
+    setError('')
     setStep('planning')
   }
 
@@ -519,6 +717,12 @@ export default function App() {
       return
     }
 
+    const zeroErr = pathBZeroCoverageError()
+    if (zeroErr) {
+      setError(zeroErr)
+      return
+    }
+
     const riskForMethod =
       designInputs.sampleSizePath === 'pathA'
         ? riskScoreToLevel(designInputs.pathA.riskLevel)
@@ -528,15 +732,10 @@ export default function App() {
       riskLevel: riskForMethod,
       highValueCount: 0,
     })
-    const allowBand =
-      designInputs.sampleSizePath === 'pathA' &&
-      pop.length <= 30 &&
-      designInputs.pathA.riskLevel >= 3
     const suggestion = suggestSampleSizeForPath({
       path: designInputs.sampleSizePath,
       pathA: designInputs.pathA,
       transactions: pop,
-      coveragePercentOverride: allowBand ? coveragePercentOverride : null,
     })
     setSampleDesign({
       ...defaultSampleDesign(recommendation.recommended),
@@ -568,6 +767,11 @@ export default function App() {
 
     if (pop.length === 0) {
       setError('No active transactions remain for sampling.')
+      return
+    }
+    const zeroErr = pathBZeroCoverageError()
+    if (zeroErr) {
+      setError(zeroErr)
       return
     }
     if (!sampleDesign.methodApproved) {
@@ -697,7 +901,50 @@ export default function App() {
         notes: '',
       })),
     )
+
+    let nextWarnings: string[] = []
+    if (designInputs.sampleSizePath === 'pathB') {
+      const requiredCoverage =
+        sizeSuggestion.pathBDetail?.requiredCoverageValue ?? 0
+      const review = pathBPostSelectionReview({
+        population: pop,
+        selected: outcome.selected,
+        requiredCoverageValue: requiredCoverage,
+      })
+      setPathBReview(review)
+      setPathBCoverageAccepted(false)
+      setPathBCoverageRationale('')
+      if (review.belowRequired) {
+        nextWarnings = [PATH_B_BELOW_REQUIRED_WARNING]
+      }
+    } else {
+      setPathBReview(null)
+    }
+    setWarnings(nextWarnings)
     setStep('testing')
+  }
+
+  function removeSelectedItem(transactionId: string) {
+    const reason = (removeDrafts[transactionId] ?? '').trim()
+    if (!reason) {
+      setError('Enter a reason before removing a sampled item.')
+      return
+    }
+    setSelected([])
+    setSelectionMeta(null)
+    setTesting([])
+    setPathBReview(null)
+    setPathBCoverageAccepted(false)
+    setPathBCoverageRationale('')
+    setRemoveDrafts({})
+    setEvaluation(defaultEvaluation())
+    setConfigSnapshot(null)
+    setSignOff(defaultSignOff())
+    setWarnings([
+      `Full re-selection required after removing a sampled item. Reason: ${reason}`,
+    ])
+    setError('')
+    setStep('selection')
   }
 
   function updateTesting(
@@ -716,6 +963,23 @@ export default function App() {
       setError('Please record an auditor conclusion before generating the working paper.')
       return
     }
+
+    if (designInputs.sampleSizePath === 'pathB') {
+      if (!evaluation.untestedRemainderBasis.trim()) {
+        setError('Path B requires an auditor basis for the untested remainder.')
+        return
+      }
+      if (pathBReview?.belowRequired) {
+        const rationaleOk = pathBCoverageRationale.trim().length >= 20
+        if (!(pathBCoverageAccepted && rationaleOk)) {
+          setError(
+            'Path B coverage is below required. Accept with a reviewer rationale (at least 20 characters), or increase size and re-run selection.',
+          )
+          return
+        }
+      }
+    }
+
     setError('')
     const exceptionCount = testing.filter((t) => t.exception).length
     const exceptionValue = testing.reduce(
@@ -770,10 +1034,11 @@ export default function App() {
     setMapping(emptyMapping())
     setTransactions([])
     setPopulationSummary(null)
+    setPopulationConfirmed(false)
+    setExcludeDrafts({})
     setEngagement(defaultEngagement())
     setDesignInputs(defaultDesignInputs())
     setSampleDesign(defaultSampleDesign())
-    setCoveragePercentOverride(SMALL_POP_HIGH_RISK_DEFAULT_PCT)
     setSizeWarning('')
     setBlockStart(0)
     setBlockRationale('')
@@ -781,6 +1046,10 @@ export default function App() {
     setHaphazardBiasConfirmed(false)
     setSelected([])
     setSelectionMeta(null)
+    setPathBReview(null)
+    setPathBCoverageAccepted(false)
+    setPathBCoverageRationale('')
+    setRemoveDrafts({})
     setTesting([])
     setEvaluation(defaultEvaluation())
     setSignOff(defaultSignOff())
@@ -873,23 +1142,23 @@ export default function App() {
         {step === 'mapping' && sheet && (
           <section className="card">
             <p className="lead-inline">
-              The header row and where data starts are detected automatically. Column
-              mapping is optional — unmapped columns are filled in order: Date, Voucher
-              No, Description, Debit, Credit.
+              Confirm the header row, data range, and required column mappings. Mapping
+              is a required confirmation — continue is blocked until required fields are
+              mapped and any ambiguous matches are resolved by the auditor.
             </p>
 
             <div className="auto-note">
               <div>
                 <span>Header row</span>
-                <strong>Row {headerRow + 1} (auto)</strong>
+                <strong>Row {headerRow + 1}</strong>
               </div>
               <div>
                 <span>Data starts</span>
-                <strong>Row {dataStart + 1} (auto)</strong>
+                <strong>Row {dataStart + 1}</strong>
               </div>
               <div>
                 <span>Data ends</span>
-                <strong>Row {dataEnd + 1} (auto)</strong>
+                <strong>Row {dataEnd + 1}</strong>
               </div>
               <div>
                 <span>Rows used</span>
@@ -897,8 +1166,8 @@ export default function App() {
               </div>
             </div>
 
-            <details className="fix-header">
-              <summary>Header looks wrong? Change it here</summary>
+            <details className="fix-header" open>
+              <summary>Header / data range</summary>
               <label htmlFor="headerPick">Column title row</label>
               <select
                 id="headerPick"
@@ -919,8 +1188,36 @@ export default function App() {
                   )
                 })}
               </select>
+
+              <label htmlFor="dataStartPick">Data start</label>
+              <select
+                id="dataStartPick"
+                value={dataStart}
+                onChange={(e) => applyDataStart(Number(e.target.value))}
+              >
+                {sheet.rows.map((_, index) => (
+                  <option key={`ds-${index}`} value={index} disabled={index <= headerRow}>
+                    Row {index + 1}
+                  </option>
+                ))}
+              </select>
+
+              <label htmlFor="dataEndPick">Data end</label>
+              <select
+                id="dataEndPick"
+                value={dataEnd}
+                onChange={(e) => applyDataEnd(Number(e.target.value))}
+              >
+                {sheet.rows.map((_, index) => (
+                  <option key={`de-${index}`} value={index} disabled={index < dataStart}>
+                    Row {index + 1}
+                  </option>
+                ))}
+              </select>
               <p className="hint">
-                If you change the header row, data start/end update automatically.
+                Changing header or data range invalidates downstream mapping results.
+                Data start must be after the header row; data end must be on or after
+                data start.
               </p>
             </details>
 
@@ -936,34 +1233,37 @@ export default function App() {
                 </thead>
                 <tbody>
                   {sheet.rows
-                    .slice(headerRow, Math.min(headerRow + 5, sheet.rows.length))
-                    .map((row, i) => (
-                      <tr
-                        key={`map-preview-${headerRow + i}`}
-                        className={i === 0 ? 'header-row' : ''}
-                      >
-                        <td>{headerRow + i + 1}</td>
-                        {row.slice(0, 8).map((cell, j) => (
-                          <td key={`${i}-${j}`}>{cellToText(cell)}</td>
-                        ))}
-                      </tr>
-                    ))}
+                    .slice(
+                      Math.min(headerRow + 1, sheet.rows.length),
+                      Math.min(headerRow + 6, sheet.rows.length),
+                    )
+                    .map((row, i) => {
+                      const rowNum = headerRow + 1 + i
+                      return (
+                        <tr key={`map-preview-${rowNum}`}>
+                          <td>{rowNum + 1}</td>
+                          {row.slice(0, 8).map((cell, j) => (
+                            <td key={`${i}-${j}`}>{cellToText(cell)}</td>
+                          ))}
+                        </tr>
+                      )
+                    })}
                 </tbody>
               </table>
             </div>
 
-            <h3 className="map-heading">Column mapping (optional)</h3>
+            <h3 className="map-heading">Column mapping (required)</h3>
             <p className="lead-inline">
-              Adjust only if auto-detect looks wrong. Soft warnings do not block
-              continue.
+              Map required fields explicitly. Continue is blocked until mapping errors
+              and auditor choices are resolved.
             </p>
 
-            {mappingWarnings.length > 0 && (
-              <div className="banner warn">{mappingWarnings.join('  •  ')}</div>
+            {mappingErrors.length > 0 && (
+              <div className="banner error">{mappingErrors.join('  •  ')}</div>
             )}
 
             {needsChoiceFields.length > 0 && (
-              <div className="banner warn">
+              <div className="banner error">
                 These fields have more than one strong match and need your confirmation:{' '}
                 {needsChoiceFields.map((f) => STANDARD_FIELD_LABELS[f]).join(', ')}.
               </div>
@@ -971,10 +1271,14 @@ export default function App() {
 
             {MAPPING_FIELD_ORDER.map((field) => {
               const state = mapping[field]
+              const fieldLabel =
+                field === 'date' && !dateHeaderPresent
+                  ? DATE_OPTIONAL_LABEL
+                  : STANDARD_FIELD_LABELS[field]
               return (
                 <div className="map-row" key={field}>
                   <div>
-                    <strong>{STANDARD_FIELD_LABELS[field]}</strong>
+                    <strong>{fieldLabel}</strong>
                     <span className={confidenceClass(state.confidence)}>
                       {state.columnIndex == null
                         ? 'not mapped'
@@ -996,29 +1300,13 @@ export default function App() {
                         )
                       }
                     >
-                      <option value="">Leave empty</option>
+                      <option value="">Not mapped</option>
                       {headers.map((header, index) => (
-                        <option key={`${header}-${index}`} value={index}>
-                          {header}
+                        <option key={`col-${index}`} value={index}>
+                          {formatColumnLabel(index, header)}
                         </option>
                       ))}
                     </select>
-                    {state.candidates.length > 1 && (
-                      <div className="candidate-row">
-                        {state.candidates.map((c) => (
-                          <button
-                            type="button"
-                            key={c.columnIndex}
-                            className={`candidate-chip ${
-                              state.columnIndex === c.columnIndex ? 'active' : ''
-                            }`}
-                            onClick={() => updateMapping(field, c.columnIndex)}
-                          >
-                            {c.header} ({Math.round(c.score)}%)
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
               )
@@ -1032,8 +1320,230 @@ export default function App() {
                 type="button"
                 className="primary"
                 onClick={confirmMappingAndBuild}
+                disabled={mappingBlocked}
               >
-                Looks correct — continue
+                Confirm mapping — continue
+              </button>
+            </div>
+          </section>
+        )}
+
+        {step === 'confirm' && (
+          <section className="card">
+            <div className="stat-grid">
+              <div>
+                <span>Confirmed transaction count (active)</span>
+                <strong>{activePop.length}</strong>
+              </div>
+              <div>
+                <span>Total coverage value</span>
+                <strong>{formatMoney(coverageTotal)}</strong>
+              </div>
+              <div>
+                <span>Excluded</span>
+                <strong>{transactions.filter((t) => t.excluded).length}</strong>
+              </div>
+              <div>
+                <span>Unresolved Debit/Credit</span>
+                <strong>{unresolvedCount}</strong>
+              </div>
+            </div>
+
+            <div className="stat-grid">
+              <div>
+                <span>Flagged totals</span>
+                <strong>{flaggedTotals.length}</strong>
+              </div>
+              <div>
+                <span>Opening / closing</span>
+                <strong>{flaggedOpening.length}</strong>
+              </div>
+              <div>
+                <span>Zero / negative</span>
+                <strong>{flaggedZeroNeg.length}</strong>
+              </div>
+              <div>
+                <span>Duplicates (not auto-excluded)</span>
+                <strong>{flaggedDuplicates.length}</strong>
+              </div>
+            </div>
+
+            <p className="lead-inline">
+              Confirm population count and coverage value. Resolve any Debit/Credit
+              conflicts and exclude rows only with a recorded reason.
+            </p>
+
+            {unresolvedCount > 0 && (
+              <div className="banner error">
+                {unresolvedCount} row(s) have both Debit and Credit values. Resolve each
+                before continuing.
+              </div>
+            )}
+            {activePop.length === 0 && (
+              <div className="banner error">
+                No active transactions remain. Restore or fix rows before continuing.
+              </div>
+            )}
+
+            {needingResolution.length > 0 && (
+              <>
+                <h3>Rows needing Debit/Credit resolution</h3>
+                <div className="preview-table-wrap preview-table-all">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Voucher / Acct</th>
+                        <th>Debit</th>
+                        <th>Credit</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {needingResolution.map((t) => (
+                        <tr key={`resolve-${t.id}`}>
+                          <td>{t.id}</td>
+                          <td>{displayRowId(t)}</td>
+                          <td>{formatMoney(t.debit)}</td>
+                          <td>{formatMoney(t.credit)}</td>
+                          <td>
+                            <div className="row-actions">
+                              <button
+                                type="button"
+                                className="small-btn"
+                                onClick={() => resolveRow(t.id, 'useDebit')}
+                              >
+                                Use Debit
+                              </button>
+                              <button
+                                type="button"
+                                className="small-btn"
+                                onClick={() => resolveRow(t.id, 'useCredit')}
+                              >
+                                Use Credit
+                              </button>
+                              <button
+                                type="button"
+                                className="small-btn"
+                                onClick={() => resolveRow(t.id, 'useMax')}
+                              >
+                                Use higher
+                              </button>
+                              <button
+                                type="button"
+                                className="small-btn"
+                                onClick={() => resolveRow(t.id, 'exclude')}
+                              >
+                                Exclude
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            <h3>Population rows</h3>
+            <div className="preview-table-wrap preview-table-all">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Date</th>
+                    <th>Voucher / Acct</th>
+                    <th>Description</th>
+                    <th>Coverage</th>
+                    <th>Flags</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transactions.map((t) => (
+                    <tr key={`confirm-${t.id}`} className={t.excluded ? 'excluded-row' : ''}>
+                      <td>{t.id}</td>
+                      <td>{t.date || '—'}</td>
+                      <td>{displayRowId(t)}</td>
+                      <td>{t.description || '—'}</td>
+                      <td>{formatMoney(t.coverageAmount)}</td>
+                      <td>
+                        {[
+                          t.needsCoverageResolution ? 'both sides' : '',
+                          t.looksLikeTotal ? 'total' : '',
+                          t.looksLikeOpeningClosing ? 'open/close' : '',
+                          t.isZeroOrNegative ? 'zero/neg' : '',
+                          t.isDuplicateVoucher ? 'duplicate' : '',
+                          t.excluded ? `excluded: ${t.exclusionReason}` : '',
+                        ]
+                          .filter(Boolean)
+                          .join(', ') || '—'}
+                      </td>
+                      <td>
+                        {t.excluded ? (
+                          <button
+                            type="button"
+                            className="small-btn"
+                            onClick={() => restoreRow(t.id)}
+                          >
+                            Restore
+                          </button>
+                        ) : t.needsCoverageResolution ? (
+                          <span className="hint">Resolve above</span>
+                        ) : (
+                          <div className="row-actions">
+                            <input
+                              className="exclude-input"
+                              placeholder="Reason to exclude"
+                              value={excludeDrafts[t.id] ?? ''}
+                              onChange={(e) =>
+                                setExcludeDrafts((prev) => ({
+                                  ...prev,
+                                  [t.id]: e.target.value,
+                                }))
+                              }
+                            />
+                            <button
+                              type="button"
+                              className="small-btn"
+                              onClick={() => excludeRow(t.id)}
+                            >
+                              Exclude
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {summary.byReason.length > 0 && (
+              <>
+                <h3>Exclusion summary</h3>
+                <ul>
+                  {summary.byReason.map((r) => (
+                    <li key={r.reason}>
+                      {r.reason}: {r.count} ({formatMoney(r.value)})
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            <div className="actions">
+              <button type="button" className="ghost" onClick={goBack}>
+                Back
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={continueFromConfirm}
+                disabled={unresolvedCount > 0 || activePop.length === 0}
+              >
+                Confirm count & value — continue
               </button>
             </div>
           </section>
@@ -1204,6 +1714,10 @@ export default function App() {
                   name="sampleSizePath"
                   checked={designInputs.sampleSizePath === 'pathB'}
                   onChange={() => {
+                    if (totalCoverageValue(activePop) <= 0) {
+                      setError('Path B cannot be used when total coverage value is zero.')
+                      return
+                    }
                     invalidateFrom('planning')
                     setDesignInputs((prev) => ({
                       ...prev,
@@ -1437,45 +1951,6 @@ export default function App() {
               </p>
             )}
 
-            {smallHighRiskBand && (
-              <>
-                <label htmlFor="coveragePct">
-                  Coverage % (small pop, high risk:{' '}
-                  {Math.round(SMALL_POP_HIGH_RISK_MIN_PCT * 100)}–
-                  {Math.round(SMALL_POP_HIGH_RISK_MAX_PCT * 100)}%)
-                </label>
-                <input
-                  id="coveragePct"
-                  type="range"
-                  min={Math.round(SMALL_POP_HIGH_RISK_MIN_PCT * 100)}
-                  max={Math.round(SMALL_POP_HIGH_RISK_MAX_PCT * 100)}
-                  step={1}
-                  value={Math.round(coveragePercentOverride * 100)}
-                  onChange={(e) => {
-                    invalidateFrom('design')
-                    const pct = Number(e.target.value) / 100
-                    setCoveragePercentOverride(pct)
-                    const next = suggestSampleSizeForPath({
-                      path: 'pathA',
-                      pathA: designInputs.pathA,
-                      transactions: activePop,
-                      coveragePercentOverride: pct,
-                    })
-                    setSampleDesign((prev) => ({
-                      ...prev,
-                      suggestedSize: next.suggestedSize,
-                      confirmedSize: next.suggestedSize,
-                      coveragePercentUsed: next.coveragePercent,
-                      sizeRuleLabel: next.ruleLabel,
-                    }))
-                  }}
-                />
-                <p className="hint">
-                  {Math.round(coveragePercentOverride * 100)}% of population
-                </p>
-              </>
-            )}
-
             <label htmlFor="confirmedSize">Confirmed sample size</label>
             <input
               id="confirmedSize"
@@ -1521,7 +1996,7 @@ export default function App() {
                   }}
                 />
                 <span>
-                  Reviewer approves reduction below suggested population coverage (
+                  Reviewer approves reduction below suggested size (
                   {sizeSuggestion.suggestedSize}).
                 </span>
               </label>
@@ -1648,7 +2123,7 @@ export default function App() {
                         onChange={() => toggleHaphazard(t.id)}
                       />
                       <span>
-                        {t.id} · {t.voucherNo || t.accountNo || 'No ref'} ·{' '}
+                        {t.id} · {displayRowId(t)} ·{' '}
                         {formatMoney(t.coverageAmount)}
                       </span>
                     </label>
@@ -1685,6 +2160,41 @@ export default function App() {
               </div>
             </div>
 
+            {designInputs.sampleSizePath === 'pathB' && pathBReview && (
+              <>
+                <div className="stat-grid">
+                  <div>
+                    <span>Path B selected coverage</span>
+                    <strong>{formatMoney(pathBReview.selectedCoverage)}</strong>
+                  </div>
+                  <div>
+                    <span>Coverage achieved</span>
+                    <strong>
+                      {pathBReview.coverageAchievedPercent.toFixed(1)}%
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Untested count / value</span>
+                    <strong>
+                      {pathBReview.untestedCount} /{' '}
+                      {formatMoney(pathBReview.untestedValue)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Required coverage</span>
+                    <strong>
+                      {formatMoney(
+                        sizeSuggestion.pathBDetail?.requiredCoverageValue ?? 0,
+                      )}
+                    </strong>
+                  </div>
+                </div>
+                {pathBReview.belowRequired && (
+                  <div className="banner error">{PATH_B_BELOW_REQUIRED_WARNING}</div>
+                )}
+              </>
+            )}
+
             <h3>Sample testing</h3>
             {selected.length === 0 ? (
               <p className="lead-inline">No sample items selected.</p>
@@ -1694,13 +2204,14 @@ export default function App() {
                   <thead>
                     <tr>
                       <th>ID</th>
-                      <th>Voucher</th>
+                      <th>Voucher / Acct</th>
                       <th>Coverage</th>
                       <th>Tested</th>
                       <th>Exception</th>
                       <th>Exception value</th>
                       <th>Nature</th>
                       <th>Notes</th>
+                      <th>§20 Remove</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1709,7 +2220,7 @@ export default function App() {
                       return (
                         <tr key={`test-${t.id}`}>
                           <td>{t.id}</td>
-                          <td>{t.voucherNo || t.accountNo || '—'}</td>
+                          <td>{displayRowId(t)}</td>
                           <td>{formatMoney(t.coverageAmount)}</td>
                           <td>
                             <input
@@ -1756,12 +2267,80 @@ export default function App() {
                               }
                             />
                           </td>
+                          <td>
+                            <div className="row-actions">
+                              <input
+                                className="exclude-input"
+                                placeholder="Removal reason"
+                                value={removeDrafts[t.id] ?? ''}
+                                onChange={(e) =>
+                                  setRemoveDrafts((prev) => ({
+                                    ...prev,
+                                    [t.id]: e.target.value,
+                                  }))
+                                }
+                              />
+                              <button
+                                type="button"
+                                className="small-btn"
+                                onClick={() => removeSelectedItem(t.id)}
+                              >
+                                Remove from sample
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       )
                     })}
                   </tbody>
                 </table>
               </div>
+            )}
+
+            {designInputs.sampleSizePath === 'pathB' && (
+              <>
+                <label htmlFor="untestedRemainderBasis">
+                  Untested remainder basis (required for Path B)
+                </label>
+                <textarea
+                  id="untestedRemainderBasis"
+                  rows={3}
+                  value={evaluation.untestedRemainderBasis}
+                  onChange={(e) =>
+                    setEvaluation((prev) => ({
+                      ...prev,
+                      untestedRemainderBasis: e.target.value,
+                    }))
+                  }
+                />
+                {pathBReview?.belowRequired && (
+                  <>
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={pathBCoverageAccepted}
+                        onChange={(e) =>
+                          setPathBCoverageAccepted(e.target.checked)
+                        }
+                      />
+                      <span>
+                        I accept Path B coverage below the required amount with
+                        documented reviewer rationale (or will increase size and
+                        re-run).
+                      </span>
+                    </label>
+                    <label htmlFor="pathBCoverageRationale">
+                      Path B coverage shortfall rationale (min 20 characters)
+                    </label>
+                    <textarea
+                      id="pathBCoverageRationale"
+                      rows={3}
+                      value={pathBCoverageRationale}
+                      onChange={(e) => setPathBCoverageRationale(e.target.value)}
+                    />
+                  </>
+                )}
+              </>
             )}
 
             <label htmlFor="natureSummary">Nature of exceptions summary</label>
@@ -1921,27 +2500,92 @@ export default function App() {
               <strong>Extracted data hash:</strong> {dataHash}
               <br />
               <strong>Worksheet:</strong>{' '}
-              {ledger?.sheets[sheetIndex]?.name || '—'} (header row {headerRow + 1})
+              {ledger?.sheets[sheetIndex]?.name || '—'} (header row {headerRow + 1};
+              data rows {dataStart + 1}–{dataEnd + 1})
+              <br />
+              <strong>Population confirmed:</strong>{' '}
+              {populationConfirmed ? 'Yes (count & coverage value)' : 'No'}
+              <br />
+              <strong>Confirmed active count:</strong> {activePop.length}
+              <br />
+              <strong>Confirmed coverage value:</strong> {formatMoney(coverageTotal)}
             </p>
 
-            <h3>Cleaning / exclusion summary</h3>
-            <p>
-              Original {summary.originalCount} ({formatMoney(summary.originalValue)}) →
-              cleaned {summary.cleanedCount} ({formatMoney(summary.cleanedValue)});
-              excluded {summary.excludedCount} ({formatMoney(summary.excludedValue)}).
-              Flags: totals {summary.flaggedTotals}, opening/closing{' '}
-              {summary.flaggedOpeningClosing}, zero/negative{' '}
-              {summary.flaggedZeroNegative}, duplicates {summary.flaggedDuplicates}{' '}
-              (not auto-excluded).
-            </p>
-            {summary.byReason.length > 0 && (
-              <ul>
-                {summary.byReason.map((r) => (
-                  <li key={r.reason}>
-                    {r.reason}: {r.count} ({formatMoney(r.value)})
-                  </li>
-                ))}
-              </ul>
+            <h3>Mapping summary</h3>
+            <ul>
+              {MAPPING_FIELD_ORDER.map((field) => (
+                <li key={`map-sum-${field}`}>
+                  {field === 'date' && !dateHeaderPresent
+                    ? DATE_OPTIONAL_LABEL
+                    : STANDARD_FIELD_LABELS[field]}
+                  :{' '}
+                  {mapping[field].columnIndex == null
+                    ? 'not mapped'
+                    : `column ${mapping[field].columnIndex + 1} (${headers[mapping[field].columnIndex!] ?? '—'})`}
+                </li>
+              ))}
+            </ul>
+
+            {summary.excludedCount > 0 && (
+              <>
+                <h3>Cleaning / exclusion summary</h3>
+                <p>
+                  Original {summary.originalCount} ({formatMoney(summary.originalValue)})
+                  → cleaned {summary.cleanedCount} ({formatMoney(summary.cleanedValue)});
+                  excluded {summary.excludedCount} ({formatMoney(summary.excludedValue)}
+                  ). Flags: totals {summary.flaggedTotals}, opening/closing{' '}
+                  {summary.flaggedOpeningClosing}, zero/negative{' '}
+                  {summary.flaggedZeroNegative}, duplicates {summary.flaggedDuplicates}{' '}
+                  (not auto-excluded).
+                </p>
+                {summary.byReason.length > 0 && (
+                  <ul>
+                    {summary.byReason.map((r) => (
+                      <li key={r.reason}>
+                        {r.reason}: {r.count} ({formatMoney(r.value)})
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+
+            {designInputs.sampleSizePath === 'pathB' && (
+              <>
+                <h3>Path B coverage</h3>
+                <p>
+                  <strong>Required coverage:</strong>{' '}
+                  {formatMoney(
+                    sizeSuggestion.pathBDetail?.requiredCoverageValue ?? 0,
+                  )}
+                  <br />
+                  <strong>Selected coverage:</strong>{' '}
+                  {formatMoney(pathBReview?.selectedCoverage ?? selectedCoverage)}
+                  <br />
+                  <strong>Coverage %:</strong>{' '}
+                  {pathBReview
+                    ? `${pathBReview.coverageAchievedPercent.toFixed(1)}%`
+                    : '—'}
+                  <br />
+                  <strong>Untested remainder:</strong>{' '}
+                  {pathBReview
+                    ? `${pathBReview.untestedCount} items / ${formatMoney(pathBReview.untestedValue)}`
+                    : '—'}
+                  <br />
+                  <strong>Auditor basis (untested remainder):</strong>{' '}
+                  {evaluation.untestedRemainderBasis || '—'}
+                  {pathBReview?.belowRequired ? (
+                    <>
+                      <br />
+                      <strong>Below-required acceptance:</strong>{' '}
+                      {pathBCoverageAccepted ? 'Yes' : 'No'}
+                      {pathBCoverageRationale
+                        ? ` — ${pathBCoverageRationale}`
+                        : ''}
+                    </>
+                  ) : null}
+                </p>
+              </>
             )}
 
             <h3>Sampling risk</h3>
@@ -2013,7 +2657,7 @@ export default function App() {
                   <tr>
                     <th>ID</th>
                     <th>Date</th>
-                    <th>Voucher</th>
+                    <th>Voucher / Acct</th>
                     <th>Description</th>
                     <th>Coverage</th>
                     <th>Exception</th>
@@ -2061,10 +2705,25 @@ export default function App() {
                 <strong>Nature summary:</strong> {evaluation.natureSummary}
               </p>
             )}
+            {evaluation.untestedRemainderBasis && (
+              <p>
+                <strong>Untested remainder basis:</strong>{' '}
+                {evaluation.untestedRemainderBasis}
+              </p>
+            )}
             {evaluation.reviewerComments && (
               <p>
                 <strong>Reviewer comments:</strong> {evaluation.reviewerComments}
               </p>
+            )}
+
+            <h3>Firm config snapshot</h3>
+            {configSnapshot ? (
+              <pre className="config-snapshot">
+                {JSON.stringify(configSnapshot, null, 2)}
+              </pre>
+            ) : (
+              <p>No config snapshot captured.</p>
             )}
 
             <h3>Prepared / reviewed by & lock</h3>

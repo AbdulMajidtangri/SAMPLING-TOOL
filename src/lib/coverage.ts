@@ -209,7 +209,10 @@ export function buildTransactions(params: {
     if (idKey) {
       if (voucherSeen.has(idKey)) {
         isDuplicateVoucher = true
-        warnings.push(`Duplicate voucher/document/ID number: ${idKey}`)
+        const idLabel = voucherNo
+          ? `voucher/document ${idKey}`
+          : `account/ID ${idKey}`
+        warnings.push(`Duplicate ${idLabel}`)
       }
       voucherSeen.add(idKey)
     }

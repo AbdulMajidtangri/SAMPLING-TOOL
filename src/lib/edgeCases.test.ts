@@ -3,6 +3,7 @@ import { buildTransactions, coverageFromDebitCredit, totalCoverageValue } from '
 import {
   detectHeaderRow,
   fillUnmappedByColumnOrder,
+  hasDateLikeHeader,
   normalizeHeader,
   scoreHeaderMatch,
   suggestMappings,
@@ -10,6 +11,7 @@ import {
 } from './headers'
 import {
   pathASampleSize,
+  pathBPostSelectionReview,
   pathBSizing,
   suggestSampleSizeForPath,
   validateSampleSizeOverride,
@@ -163,13 +165,38 @@ describe('header edge cases', () => {
     expect(result.transactions.some((t) => t.isRepeatedHeader && t.excluded)).toBe(true)
   })
 
-  it('Case 9: missing voucher no warns unless alt ID (no hard stop)', () => {
+  it('Case 9: missing voucher no is a hard stop unless alt ID', () => {
     const missing = suggestMappings(['Date', 'Description', 'Debit', 'Credit'])
-    const warnings = validateRequiredMappings(missing)
-    expect(warnings.some((e) => /Voucher No/i.test(e))).toBe(true)
+    const errors = validateRequiredMappings(missing)
+    expect(errors.some((e) => /Voucher No/i.test(e))).toBe(true)
 
     const ok = suggestMappings(['Date', 'Account No', 'Description', 'Debit', 'Credit'])
     expect(validateRequiredMappings(ok)).toHaveLength(0)
+  })
+
+  it('date is optional when no date-like header is present', () => {
+    const headers = ['Voucher No', 'Description', 'Debit', 'Credit']
+    expect(hasDateLikeHeader(headers)).toBe(false)
+    const m = suggestMappings(headers)
+    expect(m.date.columnIndex).toBeNull()
+    expect(m.voucherNo.columnIndex).toBe(0)
+    const errors = validateRequiredMappings(m, headers)
+    expect(errors.some((e) => /Date/i.test(e))).toBe(false)
+    expect(errors).toHaveLength(0)
+  })
+
+  it('date remains required when a date-like header exists', () => {
+    const headers = ['Date', 'Voucher No', 'Description', 'Debit', 'Credit']
+    const m = suggestMappings(headers)
+    expect(hasDateLikeHeader(headers)).toBe(true)
+    m.date = {
+      columnIndex: null,
+      confidence: 'none',
+      candidates: m.date.candidates,
+      needsAuditorChoice: false,
+    }
+    const errors = validateRequiredMappings(m, headers)
+    expect(errors.some((e) => /Date is required/i.test(e))).toBe(true)
   })
 
   it('positional order fills unmapped core columns left-to-right', () => {
@@ -224,33 +251,57 @@ describe('coverage amount rules', () => {
 })
 
 describe('sample size paths', () => {
-  it('Path A: small high-risk applies 60% coverage band vs matrix', () => {
+  it('Path A: uses risk matrix only (no coverage % mix)', () => {
     const r = pathASampleSize(
       { riskLevel: 3, expectedError: 2, otherEvidence: 2 },
-      20,
+      218,
     )
-    // matrix score 7 → 40, but pop is 20 so capped; coverage 60% of 20 = 12; max(40,12)=40 → cap 20
-    expect(r.coveragePercent).toBe(0.6)
-    expect(r.coverageSize).toBe(12)
-    expect(r.finalSize).toBe(20)
+    // score 7 → matrix 40; population 218 does not change matrix result
+    expect(r.score).toBe(7)
+    expect(r.matrixSize).toBe(40)
+    expect(r.coverageSize).toBeNull()
+    expect(r.finalSize).toBe(40)
   })
 
-  it('Path A: small high-risk allows 60–70% override', () => {
+  it('Path A: caps matrix size at population', () => {
     const r = pathASampleSize(
-      { riskLevel: 4, expectedError: 1, otherEvidence: 1 },
+      { riskLevel: 4, expectedError: 4, otherEvidence: 4 },
       20,
-      0.7,
     )
-    expect(r.coveragePercent).toBe(0.7)
-    expect(r.coverageSize).toBe(14)
+    // score 12 → matrix 70, capped at 20
+    expect(r.matrixSize).toBe(70)
+    expect(r.finalSize).toBe(20)
+    expect(r.isHundredPercent).toBe(true)
   })
 
-  it('Path A: large population uses matrix and count coverage', () => {
+  it('Path A: score bands match §12 matrix', () => {
+    expect(
+      pathASampleSize({ riskLevel: 1, expectedError: 1, otherEvidence: 1 }, 100)
+        .finalSize,
+    ).toBe(15)
+    expect(
+      pathASampleSize({ riskLevel: 2, expectedError: 2, otherEvidence: 1 }, 100)
+        .finalSize,
+    ).toBe(25)
+    expect(
+      pathASampleSize({ riskLevel: 3, expectedError: 2, otherEvidence: 2 }, 100)
+        .finalSize,
+    ).toBe(40)
+    expect(
+      pathASampleSize({ riskLevel: 3, expectedError: 3, otherEvidence: 3 }, 100)
+        .finalSize,
+    ).toBe(60)
+    expect(
+      pathASampleSize({ riskLevel: 4, expectedError: 4, otherEvidence: 4 }, 100)
+        .finalSize,
+    ).toBe(70)
+  })
+
+  it('Path A: large population uses matrix only (not % of count)', () => {
     const r = pathASampleSize(
       { riskLevel: 3, expectedError: 2, otherEvidence: 2 },
       100,
     )
-    // score 7 → matrix 40; high risk large pop 40% → 40; final 40
     expect(r.finalSize).toBe(40)
   })
 
@@ -309,6 +360,22 @@ describe('sample size paths', () => {
     })
     expect(allowed.ok).toBe(true)
   })
+  it('Path B post-selection review flags shortfall and untested remainder', () => {
+    const pop = Array.from({ length: 10 }, (_, i) =>
+      tx({ id: `R${i}`, rowIndex: i, coverageAmount: 100_000, debit: 100_000 }),
+    )
+    const selected = pop.slice(0, 2)
+    const review = pathBPostSelectionReview({
+      population: pop,
+      selected,
+      requiredCoverageValue: 500_000,
+    })
+    expect(review.selectedCoverage).toBe(200_000)
+    expect(review.untestedCount).toBe(8)
+    expect(review.untestedValue).toBe(800_000)
+    expect(review.belowRequired).toBe(true)
+    expect(review.coverageAchievedPercent).toBe(20)
+  })
 })
 
 describe('selection methods', () => {
@@ -356,6 +423,25 @@ describe('amount parsing via build', () => {
     expect(result.transactions[0].coverageAmount).toBeCloseTo(1250.5)
     expect(result.transactions[1].coverageAmount).toBe(500)
     expect(totalCoverageValue(result.transactions)).toBeCloseTo(1750.5)
+  })
+})
+
+describe('trimSparseColumns', () => {
+  it('drops blank and duplicate Debit/Credit columns (including dash placeholders)', async () => {
+    const { trimSparseColumns } = await import('./excel')
+    const rows = [
+      ['', 'Account no.', 'Description', 'Debit (Rs.)', 'Credit (Rs.)', 'Debit (Rs.)', 'Credit (Rs.)', 'Debit (Rs.)', 'Credit (Rs.)'],
+      ['', '800', 'Fees', '', '100', '-', '-', '', '100'],
+      ['', '801', 'Other', '', '200', '-', '-', '', '200'],
+    ]
+    const trimmed = trimSparseColumns(rows)
+    expect(trimmed[0]).toEqual([
+      'Account no.',
+      'Description',
+      'Debit (Rs.)',
+      'Credit (Rs.)',
+    ])
+    expect(trimmed[1]).toEqual(['800', 'Fees', '', '100'])
   })
 })
 

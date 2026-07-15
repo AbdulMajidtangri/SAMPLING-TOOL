@@ -2,6 +2,7 @@ export type WizardStep =
   | 'upload'
   | 'worksheet'
   | 'mapping'
+  | 'confirm'
   | 'planning'
   | 'design'
   | 'selection'
@@ -204,6 +205,7 @@ export interface EvaluationState {
   furtherTesting: 'yes' | 'no'
   conclusion: string
   reviewerComments: string
+  untestedRemainderBasis: string
 }
 
 export interface SignOffState {
@@ -254,6 +256,9 @@ export const STANDARD_FIELD_LABELS: Record<StandardField, string> = {
   amount: 'Amount (alt. if no Debit/Credit)',
 }
 
+/** Date is required only when a date-like header exists on the sheet. */
+export const DATE_OPTIONAL_LABEL = 'Date (optional — no date header found)'
+
 export const MAPPING_FIELD_ORDER: StandardField[] = [
   'date',
   'voucherNo',
@@ -272,8 +277,8 @@ export const POSITIONAL_FIELD_ORDER: StandardField[] = [
   'credit',
 ]
 
+/** Always-required core fields. Date is conditional (required only when a date header exists). */
 export const CORE_REQUIRED_FIELDS: StandardField[] = [
-  'date',
   'voucherNo',
   'description',
   'debit',

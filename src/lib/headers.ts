@@ -20,8 +20,13 @@ export const SYNONYMS: Record<StandardField, string[]> = {
   voucherNo: [
     'voucherno',
     'vouchernumber',
+    'vouchernum',
+    'voucher',
     'vchno',
     'vch',
+    'vrno',
+    'vr',
+    'vno',
     'docno',
     'documentno',
     'refno',
@@ -110,6 +115,14 @@ export function scoreHeaderMatch(
     return { score: 0, confidence: 'none' }
   }
 
+  // Never map Credit↔Debit across each other (debitrs ≈ creditrs by edit distance)
+  if (field === 'debit' && normalized.includes('credit')) {
+    return { score: 0, confidence: 'none' }
+  }
+  if (field === 'credit' && normalized.includes('debit')) {
+    return { score: 0, confidence: 'none' }
+  }
+
   const synonyms = SYNONYMS[field]
   if (synonyms.includes(normalized)) {
     return { score: 100, confidence: 'high' }
@@ -117,6 +130,11 @@ export function scoreHeaderMatch(
 
   let best = 0
   for (const synonym of synonyms) {
+    // Short tokens (dr/cr) must be exact — avoid "cr" matching inside "description"
+    if (synonym.length <= 2) {
+      if (normalized === synonym) best = Math.max(best, 100)
+      continue
+    }
     if (normalized.includes(synonym) || synonym.includes(normalized)) {
       best = Math.max(best, 82)
     }
@@ -130,6 +148,26 @@ export function scoreHeaderMatch(
   if (best >= 75) return { score: best, confidence: 'medium' }
   if (best >= 60) return { score: best, confidence: 'low' }
   return { score: best, confidence: 'none' }
+}
+
+/** Clear date-column name (avoids weak fuzzy hits like Voucher No ≈ voucherdate). */
+export function isClearDateHeader(header: string): boolean {
+  if (!header.trim()) return false
+  const normalized = normalizeHeader(header)
+  if (!normalized || normalized.startsWith('column')) return false
+
+  const synonyms = SYNONYMS.date
+  if (synonyms.includes(normalized)) return true
+  if (normalized.includes('date') || normalized === 'data') return true
+
+  return scoreHeaderMatch(header, 'date').confidence === 'high'
+}
+
+/**
+ * True when any header is clearly a date column.
+ */
+export function hasDateLikeHeader(headers: string[]): boolean {
+  return headers.some((header) => isClearDateHeader(header))
 }
 
 function columnLooksLikeDates(values: string[]): boolean {
@@ -222,6 +260,9 @@ export function suggestMappings(
 
     headers.forEach((header, index) => {
       if (!header.trim()) return
+      // Skip weak fuzzy date matches (e.g. Voucher No ≈ voucherdate)
+      if (field === 'date' && !isClearDateHeader(header)) return
+
       let match = scoreHeaderMatch(header, field)
       if (match.confidence === 'none') return
 
@@ -259,6 +300,18 @@ export function suggestMappings(
     })
 
     candidates.sort((a, b) => b.score - a.score)
+
+    // Same header text on multiple columns (merged Excel cells) → keep best only
+    const collapsed: MappingCandidate[] = []
+    const seenHeader = new Set<string>()
+    for (const c of candidates) {
+      const key = normalizeHeader(c.header) || `col${c.columnIndex}`
+      if (seenHeader.has(key)) continue
+      seenHeader.add(key)
+      collapsed.push(c)
+    }
+    candidates.length = 0
+    candidates.push(...collapsed)
 
     // Multiple strong date-like matches → auditor must choose (Case 10)
     const strong = candidates.filter((c) => c.score >= 75)
@@ -338,24 +391,32 @@ export function fillUnmappedByColumnOrder(
   return result
 }
 
-/** Soft checks only — mapping is optional; does not block continue. */
+/**
+ * Hard-stop checks for required column mapping (brief §7 / §28).
+ * Returns error messages — empty array means mapping is complete enough to continue.
+ * Date is required only when a date-like header is present (pass `headers` to enable).
+ */
 export function validateRequiredMappings(
   mapping: Record<StandardField, { columnIndex: number | null }>,
+  headers?: string[],
 ): string[] {
-  const warnings: string[] = []
+  const errors: string[] = []
 
-  if (mapping.date.columnIndex == null) {
-    warnings.push('Date is not mapped. Columns will be used in order if you continue.')
+  const dateRequired = headers == null || hasDateLikeHeader(headers)
+  if (dateRequired && mapping.date.columnIndex == null) {
+    errors.push(
+      'Date is required. Map the correct date column (if multiple dates exist, choose one).',
+    )
   }
   if (mapping.description.columnIndex == null) {
-    warnings.push('Description is not mapped.')
+    errors.push('Description is required.')
   }
 
   const hasVoucher = mapping.voucherNo.columnIndex != null
   const hasAltId = mapping.accountNo.columnIndex != null
   if (!hasVoucher && !hasAltId) {
-    warnings.push(
-      'Voucher No is not mapped. Map Voucher No or Account No, or rely on column order.',
+    errors.push(
+      'Voucher No is missing. Map Voucher No or an alternative unique ID field (e.g. Account No).',
     )
   }
 
@@ -364,11 +425,25 @@ export function validateRequiredMappings(
   const hasAmount = mapping.amount.columnIndex != null
   if (!(hasDebit && hasCredit) && !hasAmount) {
     if (!hasDebit && !hasCredit) {
-      warnings.push('Debit/Credit (or Amount) not mapped — column order will be used if possible.')
+      errors.push('Map Debit and Credit, or map a single Amount column.')
     } else {
-      warnings.push('Both Debit and Credit should be mapped (or use Amount instead).')
+      errors.push('Both Debit and Credit must be mapped (or use Amount instead).')
     }
   }
 
-  return warnings
+  return errors
+}
+
+/** Fields that still need an explicit auditor choice (multiple strong matches). */
+export function unresolvedAuditorChoices(
+  mapping: Record<StandardField, { columnIndex: number | null; needsAuditorChoice?: boolean }>,
+  headers?: string[],
+): StandardField[] {
+  const dateRequired = headers == null || hasDateLikeHeader(headers)
+  return MAPPING_FIELD_ORDER.filter(
+    (field) =>
+      mapping[field].needsAuditorChoice === true ||
+      (mapping[field].columnIndex == null &&
+        (field === 'voucherNo' || (field === 'date' && dateRequired))),
+  )
 }

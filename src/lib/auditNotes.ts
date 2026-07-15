@@ -2,26 +2,30 @@
  * Implementation audit vs updated project brief (source of truth).
  *
  * IMPLEMENTED:
- * - Upload → worksheet → headers/mapping → planning
+ * - Upload → worksheet → mapping → confirm → planning
  *   → design (method/size/risk) → selection → testing → WP
- * - Flexible header mapping + positional fallback
- * - Auto coverage resolution (useMax) after mapping; population summary retained
+ * - Required header mapping (hard-stop validateRequiredMappings); editable data start/end
+ * - Confirm population: count + coverage value; Debit/Credit resolution; exclusions with reason
+ * - No auto positional fill on continue; no auto useMax — auditor resolves both-sides rows
  * - Full planning fields (test type, assertion, objective, unit, error definition)
  * - Method recommendation with override rationale
- * - Population coverage guidance (≤30 high risk 60–70%; large-pop % by risk)
+ * - Path A / Path B sample-size guidance; Path B zero-coverage hard stop
+ * - Path B post-selection coverage review (§13.8) + untested remainder basis
  * - Sampling-risk acknowledgement statement
+ * - §20 remove-from-sample → full re-selection required
  * - Reproducibility details per method
- * - Working paper §17 fields + sign-off / lock / amendment
+ * - Working paper §17 fields + mapping summary + config JSON + sign-off / lock / amendment
  * - Firm config snapshot
  *
  * NOT USED IN THIS ENGAGEMENT FLOW:
- * - Interactive clean step (flags remain in data model / WP summary)
- * - High-value separation
+ * - Interactive clean step as a separate wizard page (flags / exclusions live on confirm + WP)
+ * - High-value separation as a wizard step
  * - Stratification as a wizard step
  *
  * CONFIGURABLE (firmConfig.ts):
  * - Audit areas, assertions, test types
- * - HV default threshold, small-pop band, large-pop % by risk
+ * - HV default threshold (retained in firm config / DesignInputs defaults; not a wizard step)
+ * - Path A risk-score matrix; Path B value-coverage tiers
  * - File assembly deadline days
  */
 export const IMPLEMENTATION_AUDIT = true

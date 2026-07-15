@@ -419,6 +419,19 @@ tr.header-row {
   font-size: 0.82rem;
 }
 
+.config-snapshot {
+  max-height: 320px;
+  overflow: auto;
+  padding: 12px 14px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--border, #d0d4dc);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .check-row {
   display: flex;
   align-items: flex-start;

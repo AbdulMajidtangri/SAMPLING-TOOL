@@ -338,16 +338,28 @@ export function fillUnmappedByColumnOrder(
   return result
 }
 
+/** True when any header looks like a date column (name match ≥ 60). */
+export function hasDateLikeHeader(headers: string[]): boolean {
+  return headers.some((header) => {
+    if (!header.trim()) return false
+    const match = scoreHeaderMatch(header, 'date')
+    return match.confidence !== 'none' && match.score >= 60
+  })
+}
+
 /**
  * Hard-stop checks for required column mapping (brief §7 / §28).
  * Returns error messages — empty array means mapping is complete enough to continue.
+ * Date is required only when a date-like header is present (pass `headers` to enable).
  */
 export function validateRequiredMappings(
   mapping: Record<StandardField, { columnIndex: number | null }>,
+  headers?: string[],
 ): string[] {
   const errors: string[] = []
 
-  if (mapping.date.columnIndex == null) {
+  const dateRequired = headers == null || hasDateLikeHeader(headers)
+  if (dateRequired && mapping.date.columnIndex == null) {
     errors.push(
       'Date is required. Map the correct date column (if multiple dates exist, choose one).',
     )
@@ -381,11 +393,13 @@ export function validateRequiredMappings(
 /** Fields that still need an explicit auditor choice (multiple strong matches). */
 export function unresolvedAuditorChoices(
   mapping: Record<StandardField, { columnIndex: number | null; needsAuditorChoice?: boolean }>,
+  headers?: string[],
 ): StandardField[] {
+  const dateRequired = headers == null || hasDateLikeHeader(headers)
   return MAPPING_FIELD_ORDER.filter(
     (field) =>
       mapping[field].needsAuditorChoice === true ||
       (mapping[field].columnIndex == null &&
-        (field === 'date' || field === 'voucherNo')),
+        (field === 'voucherNo' || (field === 'date' && dateRequired))),
   )
 }

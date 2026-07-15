@@ -3,6 +3,7 @@ import { buildTransactions, coverageFromDebitCredit, totalCoverageValue } from '
 import {
   detectHeaderRow,
   fillUnmappedByColumnOrder,
+  hasDateLikeHeader,
   normalizeHeader,
   scoreHeaderMatch,
   suggestMappings,
@@ -10,6 +11,7 @@ import {
 } from './headers'
 import {
   pathASampleSize,
+  pathBPostSelectionReview,
   pathBSizing,
   suggestSampleSizeForPath,
   validateSampleSizeOverride,
@@ -163,13 +165,37 @@ describe('header edge cases', () => {
     expect(result.transactions.some((t) => t.isRepeatedHeader && t.excluded)).toBe(true)
   })
 
-  it('Case 9: missing voucher no warns unless alt ID (no hard stop)', () => {
+  it('Case 9: missing voucher no is a hard stop unless alt ID', () => {
     const missing = suggestMappings(['Date', 'Description', 'Debit', 'Credit'])
-    const warnings = validateRequiredMappings(missing)
-    expect(warnings.some((e) => /Voucher No/i.test(e))).toBe(true)
+    const errors = validateRequiredMappings(missing)
+    expect(errors.some((e) => /Voucher No/i.test(e))).toBe(true)
 
     const ok = suggestMappings(['Date', 'Account No', 'Description', 'Debit', 'Credit'])
     expect(validateRequiredMappings(ok)).toHaveLength(0)
+  })
+
+  it('date is optional when no date-like header is present', () => {
+    const headers = ['Voucher No', 'Description', 'Debit', 'Credit']
+    const m = suggestMappings(headers)
+    expect(m.date.columnIndex).toBeNull()
+    expect(hasDateLikeHeader(headers)).toBe(false)
+    const errors = validateRequiredMappings(m, headers)
+    expect(errors.some((e) => /Date/i.test(e))).toBe(false)
+    expect(errors).toHaveLength(0)
+  })
+
+  it('date remains required when a date-like header exists', () => {
+    const headers = ['Date', 'Voucher No', 'Description', 'Debit', 'Credit']
+    const m = suggestMappings(headers)
+    expect(hasDateLikeHeader(headers)).toBe(true)
+    m.date = {
+      columnIndex: null,
+      confidence: 'none',
+      candidates: m.date.candidates,
+      needsAuditorChoice: false,
+    }
+    const errors = validateRequiredMappings(m, headers)
+    expect(errors.some((e) => /Date is required/i.test(e))).toBe(true)
   })
 
   it('positional order fills unmapped core columns left-to-right', () => {
@@ -308,6 +334,22 @@ describe('sample size paths', () => {
       reviewerApproved: true,
     })
     expect(allowed.ok).toBe(true)
+  })
+  it('Path B post-selection review flags shortfall and untested remainder', () => {
+    const pop = Array.from({ length: 10 }, (_, i) =>
+      tx({ id: `R${i}`, rowIndex: i, coverageAmount: 100_000, debit: 100_000 }),
+    )
+    const selected = pop.slice(0, 2)
+    const review = pathBPostSelectionReview({
+      population: pop,
+      selected,
+      requiredCoverageValue: 500_000,
+    })
+    expect(review.selectedCoverage).toBe(200_000)
+    expect(review.untestedCount).toBe(8)
+    expect(review.untestedValue).toBe(800_000)
+    expect(review.belowRequired).toBe(true)
+    expect(review.coverageAchievedPercent).toBe(20)
   })
 })
 

@@ -7,6 +7,7 @@ export type WizardStep =
   | 'design'
   | 'selection'
   | 'testing'
+  | 'evaluation'
   | 'workingPaper'
 
 export type StandardField =

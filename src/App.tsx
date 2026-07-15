@@ -69,6 +69,7 @@ import {
   TOOL_VERSION,
 } from './lib/types'
 import './App.css'
+import { MAIN_SCREEN_OPTIONS, type MainScreenId } from './lib/navigation'
 
 const STEPS: WizardStep[] = [
   'upload',
@@ -79,6 +80,7 @@ const STEPS: WizardStep[] = [
   'design',
   'selection',
   'testing',
+  'evaluation',
   'workingPaper',
 ]
 
@@ -91,6 +93,7 @@ const STEP_TITLES: Record<WizardStep, string> = {
   design: 'Method, size & sampling risk',
   selection: 'Generate sample',
   testing: 'Testing results',
+  evaluation: 'Evaluation',
   workingPaper: 'Working paper',
 }
 
@@ -238,6 +241,7 @@ function displayRowId(t: { voucherNo: string; accountNo: string }): string {
 
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [screen, setScreen] = useState<MainScreenId>('samplingWorkspace')
   const [step, setStep] = useState<WizardStep>('upload')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -1026,6 +1030,7 @@ export default function App() {
   }
 
   function resetAll() {
+    setScreen('samplingWorkspace')
     setStep('upload')
     setBusy(false)
     setError('')

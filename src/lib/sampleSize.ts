@@ -239,6 +239,8 @@ export function pathBPostSelectionReview(params: {
     belowRequired: selectedCoverage + 0.005 < requiredCoverageValue,
   }
 }
+
+export function validateSampleSizeOverride(params: {
   proposed: number
   calculated: number
   population: number

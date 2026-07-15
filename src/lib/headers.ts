@@ -338,12 +338,23 @@ export function fillUnmappedByColumnOrder(
   return result
 }
 
-/** True when any header looks like a date column (name match ≥ 60). */
+/**
+ * True when any header is clearly a date column.
+ * Uses exact synonyms / "date" in the name / high-confidence match only —
+ * not low fuzzy scores (e.g. "Voucher No" ≈ "voucherdate").
+ */
 export function hasDateLikeHeader(headers: string[]): boolean {
   return headers.some((header) => {
     if (!header.trim()) return false
+    const normalized = normalizeHeader(header)
+    if (!normalized || normalized.startsWith('column')) return false
+
+    const synonyms = SYNONYMS.date
+    if (synonyms.includes(normalized)) return true
+    if (normalized.includes('date') || normalized === 'data') return true
+
     const match = scoreHeaderMatch(header, 'date')
-    return match.confidence !== 'none' && match.score >= 60
+    return match.confidence === 'high'
   })
 }
 

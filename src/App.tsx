@@ -352,6 +352,10 @@ export default function App() {
     )
 
   const selectedCoverage = useMemo(() => totalCoverageValue(selected), [selected])
+  const selectedForTesting = useMemo(
+    () => [...selected].sort((a, b) => a.rowIndex - b.rowIndex),
+    [selected],
+  )
   const unresolvedCount = useMemo(
     () => unresolvedBothSides(transactions),
     [transactions],
@@ -2205,6 +2209,8 @@ export default function App() {
                     <tr>
                       <th>ID</th>
                       <th>Voucher / Acct</th>
+                      <th>Debit</th>
+                      <th>Credit</th>
                       <th>Coverage</th>
                       <th>Tested</th>
                       <th>Exception</th>
@@ -2215,12 +2221,14 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {selected.map((t) => {
+                    {selectedForTesting.map((t) => {
                       const row = testing.find((x) => x.transactionId === t.id)
                       return (
                         <tr key={`test-${t.id}`}>
                           <td>{t.id}</td>
                           <td>{displayRowId(t)}</td>
+                          <td>{formatMoney(t.debit)}</td>
+                          <td>{formatMoney(t.credit)}</td>
                           <td>{formatMoney(t.coverageAmount)}</td>
                           <td>
                             <input

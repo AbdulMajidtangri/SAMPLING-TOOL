@@ -73,13 +73,17 @@ button:disabled {
   top: 0;
   z-index: 40;
   display: grid;
-  grid-template-columns: minmax(220px, 1.1fr) auto minmax(180px, 0.9fr);
+  grid-template-columns: minmax(200px, 1fr) minmax(120px, 2fr) auto;
   align-items: center;
   gap: 16px;
   padding: 12px 20px;
   background: rgba(247, 249, 251, 0.92);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
+}
+
+.topbar-spacer {
+  min-height: 36px;
 }
 
 .topbar-brand {
@@ -118,33 +122,11 @@ button:disabled {
 }
 
 .screen-nav {
-  display: inline-flex;
-  padding: 4px;
-  border-radius: 999px;
-  background: #e8eef3;
-  border: 1px solid var(--line);
-  gap: 2px;
+  display: none;
 }
 
 .screen-tab {
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  padding: 8px 16px;
-  border-radius: 999px;
-  font-weight: 600;
-  font-size: 0.9rem;
-  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
-}
-
-.screen-tab:hover {
-  color: var(--ink);
-}
-
-.screen-tab.is-current {
-  background: #fff;
-  color: var(--accent);
-  box-shadow: var(--shadow-soft);
+  display: none;
 }
 
 .topbar-status {
@@ -194,12 +176,32 @@ button:disabled {
 }
 
 .rail-title {
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   font-size: 0.72rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
   font-weight: 700;
+}
+
+.next-hint {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.84rem;
+  font-weight: 550;
+  line-height: 1.35;
+  border: 1px solid #b9d5d8;
+}
+
+.rail-wp-btn {
+  margin-top: 12px;
+}
+
+.wp-open-btn {
+  min-width: 200px;
 }
 
 .rail-list {

@@ -38,12 +38,10 @@ import {
 } from './lib/firmConfig'
 import { recommendMethod } from './lib/methodRecommend'
 import { buildPopulationSummary } from './lib/populationSummary'
-import { hashExtractedData } from './lib/hash'
 import type {
   CoverageResolution,
   DesignInputs,
   EngagementMeta,
-  EvaluationState,
   FieldMappingState,
   FirmConfigSnapshot,
   LedgerTransaction,
@@ -52,11 +50,9 @@ import type {
   RiskLevel,
   RiskScore,
   SampleDesignState,
-  SelectionMeta,
   SelectionMethod,
   SignOffState,
   StandardField,
-  TestingResult,
   UploadedLedger,
   WizardStep,
 } from './lib/types'
@@ -68,7 +64,7 @@ import {
   TOOL_VERSION,
 } from './lib/types'
 import './App.css'
-import { MAIN_SCREEN_OPTIONS, type MainScreenId } from './lib/navigation'
+import { type MainScreenId } from './lib/navigation'
 
 const STEPS: WizardStep[] = [
   'upload',
@@ -87,13 +83,13 @@ const WORKSPACE_SECTIONS: Array<{
   title: string
   blurb: string
 }> = [
-  { id: 'upload', title: 'Ledger upload', blurb: 'Upload Excel and choose the worksheet' },
-  { id: 'mapping', title: 'Headers & mapping', blurb: 'Confirm header row, range, and columns' },
-  { id: 'confirm', title: 'Data quality', blurb: 'Resolve flags and confirm the population' },
-  { id: 'planning', title: 'Audit information', blurb: 'Engagement details and sample-size path' },
-  { id: 'design', title: 'Sample size confirmation', blurb: 'Confirm size before any item selection' },
-  { id: 'selection', title: 'Selection method', blurb: 'Select exactly the confirmed sample size' },
-  { id: 'testing', title: 'Testing & evaluation', blurb: 'Record results and conclude' },
+  { id: 'upload', title: '1. Upload', blurb: 'Add the Excel file' },
+  { id: 'mapping', title: '2. Map columns', blurb: 'Match Date, Voucher, Amounts' },
+  { id: 'confirm', title: '3. Check data', blurb: 'Fix warnings, then confirm' },
+  { id: 'planning', title: '4. Audit details', blurb: 'Client info + Path A or B' },
+  { id: 'design', title: '5. Sample size', blurb: 'Confirm how many to test' },
+  { id: 'selection', title: '6. Pick sample', blurb: 'Choose the transactions' },
+  { id: 'testing', title: '7. Selected items', blurb: 'Review list & open WP' },
 ]
 
 const DEFAULT_SIZE_RATIONALE =
@@ -101,10 +97,8 @@ const DEFAULT_SIZE_RATIONALE =
 const DEFAULT_SAMPLING_UNIT = 'Individual expense voucher / document'
 const DEFAULT_HIGH_VALUE_BASIS =
   'Absolute coverage amount at or above the stated threshold (specific testing, not sampling).'
-const DEFAULT_UNTESTED_REMAINDER_BASIS =
-  'Remainder accepted based on audit risk assessment and other audit procedures performed.'
 const PATH_B_BELOW_REQUIRED_WARNING =
-  'Path B §13.8: selected coverage is below the required coverage value. Increase sample size and re-run selection, or document reviewer-approved rationale before finishing testing.'
+  'Selected coverage is below the required coverage value. Increase sample size and re-run selection if needed.'
 
 function confidenceClass(confidence: MappingConfidence): string {
   return `confidence ${confidence}`
@@ -181,19 +175,6 @@ function defaultSampleDesign(
     samplingRiskAccepted: false,
     sizeReviewerApproved: false,
     sizeRuleLabel: '',
-  }
-}
-
-function defaultEvaluation(): EvaluationState {
-  return {
-    exceptionCount: 0,
-    exceptionValue: 0,
-    natureSummary: '',
-    widerIssue: 'no',
-    furtherTesting: 'no',
-    conclusion: '',
-    reviewerComments: '',
-    untestedRemainderBasis: DEFAULT_UNTESTED_REMAINDER_BASIS,
   }
 }
 
@@ -276,15 +257,7 @@ export default function App() {
   const [haphazardBiasConfirmed, setHaphazardBiasConfirmed] = useState(false)
 
   const [selected, setSelected] = useState<LedgerTransaction[]>([])
-  const [selectionMeta, setSelectionMeta] = useState<SelectionMeta | null>(null)
   const [pathBReview, setPathBReview] = useState<PathBReview | null>(null)
-  const [pathBCoverageAccepted, setPathBCoverageAccepted] = useState(false)
-  const [pathBCoverageRationale, setPathBCoverageRationale] = useState('')
-  const [removeDrafts, setRemoveDrafts] = useState<Record<string, string>>({})
-
-  const [testing, setTesting] = useState<TestingResult[]>([])
-  const [evaluation, setEvaluation] = useState<EvaluationState>(defaultEvaluation())
-
   const [signOff, setSignOff] = useState<SignOffState>(defaultSignOff())
   const [configSnapshot, setConfigSnapshot] = useState<FirmConfigSnapshot | null>(null)
 
@@ -298,7 +271,6 @@ export default function App() {
   }, [sheet, headerRow])
 
   const activePop = useMemo(() => activeTransactions(transactions), [transactions])
-  const dataHash = useMemo(() => hashExtractedData(transactions), [transactions])
 
   const liveSummary = useMemo(
     () => buildPopulationSummary(transactions),
@@ -421,11 +393,7 @@ export default function App() {
     }
     if (idx <= selectionIdx) {
       setSelected([])
-      setSelectionMeta(null)
       setPathBReview(null)
-      setPathBCoverageAccepted(false)
-      setPathBCoverageRationale('')
-      setRemoveDrafts({})
     }
     if (idx < selectionIdx) {
       setBlockStart(0)
@@ -434,12 +402,8 @@ export default function App() {
       setHaphazardBiasConfirmed(false)
     }
     if (idx <= testingIdx) {
-      setTesting([])
-      setEvaluation(defaultEvaluation())
       setConfigSnapshot(null)
       setSignOff(defaultSignOff())
-      setPathBCoverageAccepted(false)
-      setPathBCoverageRationale('')
     }
 
     setError('')
@@ -859,43 +823,29 @@ export default function App() {
       }
     }
 
-    let outcome: { selected: LedgerTransaction[]; meta: SelectionMeta }
+    let selectedItems: LedgerTransaction[]
     try {
       if (method === 'random') {
-        outcome = selectRandom(pop, size)
+        selectedItems = selectRandom(pop, size).selected
       } else if (method === 'systematic') {
-        outcome = selectSystematic(pop, size)
+        selectedItems = selectSystematic(pop, size).selected
       } else if (method === 'block') {
-        outcome = selectBlock(pop, size, blockStart, blockRationale)
+        selectedItems = selectBlock(pop, size, blockStart, blockRationale).selected
       } else {
-        outcome = selectHaphazard(pop, haphazardIds, haphazardBiasConfirmed)
+        selectedItems = selectHaphazard(pop, haphazardIds, haphazardBiasConfirmed).selected
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Selection failed.')
       return
     }
 
-    if (outcome.selected.length !== size) {
+    if (selectedItems.length !== size) {
       setError('Selected item count must equal the confirmed sample size.')
       return
     }
 
     setError('')
-    setSelected(outcome.selected)
-    setSelectionMeta({
-      ...outcome.meta,
-      rationale: sampleDesign.methodOverrideReason || outcome.meta.rationale,
-    })
-    setTesting(
-      outcome.selected.map((item) => ({
-        transactionId: item.id,
-        tested: false,
-        exception: false,
-        exceptionValue: 0,
-        nature: '',
-        notes: '',
-      })),
-    )
+    setSelected(selectedItems)
 
     let nextWarnings: string[] = []
     if (designInputs.sampleSizePath === 'pathB') {
@@ -903,12 +853,10 @@ export default function App() {
         sizeSuggestion.pathBDetail?.requiredCoverageValue ?? 0
       const review = pathBPostSelectionReview({
         population: pop,
-        selected: outcome.selected,
+        selected: selectedItems,
         requiredCoverageValue: requiredCoverage,
       })
       setPathBReview(review)
-      setPathBCoverageAccepted(false)
-      setPathBCoverageRationale('')
       if (review.belowRequired) {
         nextWarnings = [PATH_B_BELOW_REQUIRED_WARNING]
       }
@@ -919,76 +867,20 @@ export default function App() {
     setStep('testing')
   }
 
-  function removeSelectedItem(transactionId: string) {
-    const reason = (removeDrafts[transactionId] ?? '').trim()
-    if (!reason) {
-      setError('Enter a reason before removing a sampled item.')
-      return
-    }
-    setSelected([])
-    setSelectionMeta(null)
-    setTesting([])
-    setPathBReview(null)
-    setPathBCoverageAccepted(false)
-    setPathBCoverageRationale('')
-    setRemoveDrafts({})
-    setEvaluation(defaultEvaluation())
-    setConfigSnapshot(null)
-    setSignOff(defaultSignOff())
-    setWarnings([
-      `Full re-selection required after removing a sampled item. Reason: ${reason}`,
-    ])
-    setError('')
-    setStep('selection')
-  }
-
-  function updateTesting(
-    transactionId: string,
-    patch: Partial<TestingResult>,
-  ) {
-    setTesting((prev) =>
-      prev.map((row) =>
-        row.transactionId === transactionId ? { ...row, ...patch } : row,
-      ),
-    )
-  }
-
   function finishTesting() {
-    if (!evaluation.conclusion.trim()) {
-      setError('Please record an auditor conclusion before generating the working paper.')
+    if (selected.length === 0) {
+      setError('Select sample items before opening the working paper.')
       return
     }
 
-    if (designInputs.sampleSizePath === 'pathB') {
-      if (!evaluation.untestedRemainderBasis.trim()) {
-        setError('Path B requires an auditor basis for the untested remainder.')
-        return
-      }
-      if (pathBReview?.belowRequired) {
-        const rationaleOk = pathBCoverageRationale.trim().length >= 20
-        if (!(pathBCoverageAccepted && rationaleOk)) {
-          setError(
-            'Path B coverage is below required. Accept with a reviewer rationale (at least 20 characters), or increase size and re-run selection.',
-          )
-          return
-        }
-      }
-    }
-
     setError('')
-    const exceptionCount = testing.filter((t) => t.exception).length
-    const exceptionValue = testing.reduce(
-      (sum, t) => sum + (t.exception ? t.exceptionValue : 0),
-      0,
-    )
-    setEvaluation((prev) => ({ ...prev, exceptionCount, exceptionValue }))
     setConfigSnapshot(captureFirmConfigSnapshot())
     setSignOff((prev) => ({
       ...prev,
       reviewStatus: prev.preparedBy ? 'prepared' : 'draft',
       fileAssemblyDeadline: prev.fileAssemblyDeadline,
     }))
-    setStep('evaluation')
+    setStep('testing')
     setScreen('workingPaper')
   }
 
@@ -1042,13 +934,7 @@ export default function App() {
     setHaphazardIds([])
     setHaphazardBiasConfirmed(false)
     setSelected([])
-    setSelectionMeta(null)
     setPathBReview(null)
-    setPathBCoverageAccepted(false)
-    setPathBCoverageRationale('')
-    setRemoveDrafts({})
-    setTesting([])
-    setEvaluation(defaultEvaluation())
     setSignOff(defaultSignOff())
     setConfigSnapshot(null)
   }
@@ -1092,25 +978,37 @@ export default function App() {
     if (id === 'planning') return sampleDesign.suggestedSize > 0
     if (id === 'design') return currentSectionIndex > stepOrderIndex('design')
     if (id === 'selection') return selected.length > 0
-    if (id === 'testing') return !!configSnapshot
+    if (id === 'testing') return selected.length > 0
     return false
   }
 
   const statusLabel = !ledger
-    ? 'Awaiting ledger'
+    ? 'Start by uploading a ledger'
     : transactions.length === 0
-      ? 'Mapping columns'
+      ? 'Next: map the columns'
       : !populationConfirmed
-        ? 'Reviewing data quality'
+        ? 'Next: check data & confirm'
         : selected.length === 0
           ? sampleDesign.confirmedSize > 0 && currentSectionIndex >= stepOrderIndex('selection')
-            ? 'Ready to select'
-            : 'Sizing sample'
-          : configSnapshot
-            ? 'Working paper ready'
-            : 'Testing in progress'
+            ? 'Next: pick the sample'
+            : 'Next: set sample size'
+          : 'Ready — open working paper'
 
-  const canOpenWorkingPaper = selected.length > 0 && !!evaluation.conclusion.trim()
+  const nextStepHint = !ledger
+    ? 'Upload the client Excel file to begin.'
+    : transactions.length === 0
+      ? 'Match the required columns, then click Confirm mapping.'
+      : !populationConfirmed
+        ? 'Resolve any red warnings, then confirm the population.'
+        : sampleDesign.suggestedSize === 0
+          ? 'Fill audit details, choose Path A or B, then calculate sample size.'
+          : currentSectionIndex < stepOrderIndex('selection')
+            ? 'Confirm the sample size, then continue.'
+            : selected.length === 0
+              ? 'Select the transactions for your sample.'
+              : 'Review the selected items, then open the working paper.'
+
+  const canOpenWorkingPaper = selected.length > 0
 
   function goToSection(id: WizardStep) {
     if (!sectionUnlocked(id) && id !== 'upload') return
@@ -1123,10 +1021,6 @@ export default function App() {
   }
 
   function openWorkingPaperPreview() {
-    if (!canOpenWorkingPaper && !configSnapshot) {
-      finishTesting()
-      return
-    }
     if (!configSnapshot) {
       finishTesting()
       return
@@ -1154,35 +1048,11 @@ export default function App() {
         <div className="topbar-brand">
           <div className="brand-mark" aria-hidden="true" />
           <div>
-            <p className="brand">Non-Statistical Audit Sampling</p>
-            <p className="file-chip">{ledger?.fileName ?? 'No ledger loaded'}</p>
+            <p className="brand">Audit Sampling</p>
+            <p className="file-chip">{ledger?.fileName ?? 'No file yet'}</p>
           </div>
         </div>
-
-        <nav className="screen-nav" aria-label="Main screens">
-          {MAIN_SCREEN_OPTIONS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              className={`screen-tab ${screen === option.id ? 'is-current' : ''}`}
-              onClick={() => {
-                if (option.id === 'workingPaper' && !configSnapshot && !canOpenWorkingPaper) {
-                  setError('Complete testing and evaluation before opening the working paper.')
-                  return
-                }
-                if (option.id === 'workingPaper' && !configSnapshot) {
-                  openWorkingPaperPreview()
-                  return
-                }
-                setScreen(option.id)
-                setError('')
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
-        </nav>
-
+        <div className="topbar-spacer" aria-hidden="true" />
         <div className="topbar-status">
           <span className={`status-dot ${ledger ? 'on' : ''}`} />
           <span>{statusLabel}</span>
@@ -1201,7 +1071,8 @@ export default function App() {
       {screen === 'samplingWorkspace' ? (
         <div className="workspace-layout">
           <aside className="progress-rail" aria-label="Workspace progress">
-            <p className="rail-title">Progress</p>
+            <p className="rail-title">Your steps</p>
+            <p className="next-hint">{nextStepHint}</p>
             <ol className="rail-list">
               {WORKSPACE_SECTIONS.map((section, index) => {
                 const unlocked = sectionUnlocked(section.id)
@@ -1232,6 +1103,15 @@ export default function App() {
                 )
               })}
             </ol>
+            {(configSnapshot || canOpenWorkingPaper) && (
+              <button
+                type="button"
+                className="primary summary-cta rail-wp-btn"
+                onClick={openWorkingPaperPreview}
+              >
+                Open working paper
+              </button>
+            )}
           </aside>
 
           <main className="workspace-main">
@@ -1239,10 +1119,10 @@ export default function App() {
               <div className="ws-card-head">
                 <div>
                   <p className="section-kicker">Step 1</p>
-                  <h2>Ledger upload</h2>
+                  <h2>Upload the ledger</h2>
                   <p className="section-lead">
-                    Upload the client Excel ledger, then confirm the worksheet. Everything
-                    stays on this workspace — no separate upload screen.
+                    Choose the Excel file. Then pick the worksheet that has the
+                    transactions.
                   </p>
                 </div>
               </div>
@@ -1313,7 +1193,7 @@ export default function App() {
                         goToSection('mapping')
                       }}
                     >
-                      Continue to mapping
+                      Continue
                     </button>
                   </div>
                 </div>
@@ -1325,10 +1205,10 @@ export default function App() {
                 <div className="ws-card-head">
                   <div>
                     <p className="section-kicker">Step 2</p>
-                    <h2>Headers & column mapping</h2>
+                    <h2>Map the columns</h2>
                     <p className="section-lead">
-                      Confirm header row and data range, then map required fields. Column
-                      order does not matter; extra client columns are allowed.
+                      Check the header row, then match Date, Voucher No, Description,
+                      Debit, and Credit. Extra columns are fine.
                     </p>
                   </div>
                 </div>
@@ -1509,10 +1389,10 @@ export default function App() {
                 <div className="ws-card-head">
                   <div>
                     <p className="section-kicker">Step 3</p>
-                    <h2>Data quality</h2>
+                    <h2>Check the data</h2>
                     <p className="section-lead">
-                      Review warnings, resolve Debit/Credit conflicts, and confirm the
-                      population. No full reconciliation is performed.
+                      Fix any red warnings (like both Debit and Credit filled). Then
+                      confirm the list you will sample from.
                     </p>
                   </div>
                 </div>
@@ -1692,10 +1572,10 @@ export default function App() {
                 <div className="ws-card-head">
                   <div>
                     <p className="section-kicker">Step 4</p>
-                    <h2>Audit information & sample-size path</h2>
+                    <h2>Audit details</h2>
                     <p className="section-lead">
-                      Capture engagement details, then choose Path A (risk score) or Path B
-                      (value coverage).
+                      Enter client info, then choose how to size the sample: Path A
+                      (risk score) or Path B (value coverage).
                     </p>
                   </div>
                 </div>
@@ -1968,10 +1848,10 @@ export default function App() {
                 <div className="ws-card-head">
                   <div>
                     <p className="section-kicker">Step 5</p>
-                    <h2>Sample size confirmation</h2>
+                    <h2>Confirm sample size</h2>
                     <p className="section-lead">
-                      Confirm size before any final item selection. Changing size clears
-                      downstream results.
+                      Accept or adjust how many items to test. You cannot pick the sample
+                      until this size is confirmed.
                     </p>
                   </div>
                 </div>
@@ -2158,10 +2038,10 @@ export default function App() {
                 <div className="ws-card-head">
                   <div>
                     <p className="section-kicker">Step 6</p>
-                    <h2>Select transactions</h2>
+                    <h2>Pick the sample</h2>
                     <p className="section-lead">
-                      Final selection must equal the confirmed sample size (
-                      {sampleDesign.confirmedSize}).
+                      Choose the selection method. The tool will pick exactly{' '}
+                      {sampleDesign.confirmedSize} transactions.
                     </p>
                   </div>
                 </div>
@@ -2253,6 +2133,15 @@ export default function App() {
                   <button type="button" className="primary" onClick={runSelection}>
                     Select transactions
                   </button>
+                  {selected.length > 0 && (
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={openWorkingPaperPreview}
+                    >
+                      Open working paper →
+                    </button>
+                  )}
                 </div>
 
                 {selected.length > 0 && (
@@ -2314,247 +2203,61 @@ export default function App() {
                 <div className="ws-card-head">
                   <div>
                     <p className="section-kicker">Step 7</p>
-                    <h2>Testing results & evaluation</h2>
+                    <h2>Selected items</h2>
                     <p className="section-lead">
-                      Record pass/fail/exception outcomes, then save evaluation before
-                      previewing the working paper.
+                      These are the transactions selected for testing. Open the working
+                      paper to print or export this list — no conclusion is required.
                     </p>
                   </div>
                 </div>
 
-                {designInputs.sampleSizePath === 'pathB' && pathBReview?.belowRequired && (
-                  <div className="banner error">{PATH_B_BELOW_REQUIRED_WARNING}</div>
-                )}
+                <div className="stat-grid">
+                  <div>
+                    <span>Selected count</span>
+                    <strong>{selected.length}</strong>
+                  </div>
+                  <div>
+                    <span>Selected coverage</span>
+                    <strong>{formatMoney(selectedCoverage)}</strong>
+                  </div>
+                </div>
 
                 <div className="preview-table-wrap preview-table-all">
                   <table>
                     <thead>
                       <tr>
-                        <th>ID</th>
-                        <th>Voucher</th>
+                        <th>#</th>
+                        <th>Date</th>
+                        <th>Voucher No</th>
+                        <th>Description</th>
+                        <th>Debit</th>
+                        <th>Credit</th>
                         <th>Coverage</th>
-                        <th>Tested</th>
-                        <th>Exception</th>
-                        <th>Exception value</th>
-                        <th>Nature</th>
-                        <th>Notes / reference</th>
-                        <th>§20 Remove</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedForTesting.map((t) => {
-                        const row = testing.find((x) => x.transactionId === t.id)
-                        return (
-                          <tr key={`test-${t.id}`}>
-                            <td>{t.id}</td>
-                            <td>{displayRowId(t)}</td>
-                            <td>{formatMoney(t.coverageAmount)}</td>
-                            <td>
-                              <input
-                                type="checkbox"
-                                checked={row?.tested ?? false}
-                                onChange={(e) => updateTesting(t.id, { tested: e.target.checked })}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                type="checkbox"
-                                checked={row?.exception ?? false}
-                                onChange={(e) =>
-                                  updateTesting(t.id, { exception: e.target.checked })
-                                }
-                              />
-                            </td>
-                            <td>
-                              <input
-                                type="number"
-                                value={row?.exceptionValue ?? 0}
-                                onChange={(e) =>
-                                  updateTesting(t.id, {
-                                    exceptionValue: Number(e.target.value),
-                                  })
-                                }
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={row?.nature ?? ''}
-                                onChange={(e) => updateTesting(t.id, { nature: e.target.value })}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={row?.notes ?? ''}
-                                onChange={(e) => updateTesting(t.id, { notes: e.target.value })}
-                              />
-                            </td>
-                            <td>
-                              <div className="row-actions">
-                                <input
-                                  className="exclude-input"
-                                  placeholder="Removal reason"
-                                  value={removeDrafts[t.id] ?? ''}
-                                  onChange={(e) =>
-                                    setRemoveDrafts((prev) => ({
-                                      ...prev,
-                                      [t.id]: e.target.value,
-                                    }))
-                                  }
-                                />
-                                <button
-                                  type="button"
-                                  className="small-btn"
-                                  onClick={() => removeSelectedItem(t.id)}
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        )
-                      })}
+                      {selectedForTesting.map((t, index) => (
+                        <tr key={`finish-${t.id}`}>
+                          <td>{index + 1}</td>
+                          <td>{t.date || '—'}</td>
+                          <td>{displayRowId(t)}</td>
+                          <td>{t.description || '—'}</td>
+                          <td>{formatMoney(t.debit)}</td>
+                          <td>{formatMoney(t.credit)}</td>
+                          <td>{formatMoney(t.coverageAmount)}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
 
-                {designInputs.sampleSizePath === 'pathB' && (
-                  <>
-                    <label htmlFor="untestedRemainderBasis">
-                      Untested remainder basis (required for Path B)
-                    </label>
-                    <textarea
-                      id="untestedRemainderBasis"
-                      rows={3}
-                      value={evaluation.untestedRemainderBasis}
-                      onChange={(e) =>
-                        setEvaluation((prev) => ({
-                          ...prev,
-                          untestedRemainderBasis: e.target.value,
-                        }))
-                      }
-                    />
-                    {pathBReview?.belowRequired && (
-                      <>
-                        <label className="check-row">
-                          <input
-                            type="checkbox"
-                            checked={pathBCoverageAccepted}
-                            onChange={(e) => setPathBCoverageAccepted(e.target.checked)}
-                          />
-                          <span>
-                            I accept Path B coverage below the required amount with documented
-                            reviewer rationale.
-                          </span>
-                        </label>
-                        <label htmlFor="pathBCoverageRationale">
-                          Coverage shortfall rationale (min 20 characters)
-                        </label>
-                        <textarea
-                          id="pathBCoverageRationale"
-                          rows={3}
-                          value={pathBCoverageRationale}
-                          onChange={(e) => setPathBCoverageRationale(e.target.value)}
-                        />
-                      </>
-                    )}
-                  </>
-                )}
-
-                <h3>Evaluation</h3>
-                <label htmlFor="natureSummary">Nature of exceptions</label>
-                <textarea
-                  id="natureSummary"
-                  rows={2}
-                  value={evaluation.natureSummary}
-                  onChange={(e) =>
-                    setEvaluation((prev) => ({ ...prev, natureSummary: e.target.value }))
-                  }
-                />
-
-                <div className="form-grid grid-3">
-                  <div>
-                    <label htmlFor="widerIssue">Wider issue indicated?</label>
-                    <select
-                      id="widerIssue"
-                      value={evaluation.widerIssue}
-                      onChange={(e) =>
-                        setEvaluation((prev) => ({
-                          ...prev,
-                          widerIssue: e.target.value as EvaluationState['widerIssue'],
-                        }))
-                      }
-                    >
-                      <option value="no">No</option>
-                      <option value="yes">Yes</option>
-                      <option value="unclear">Unclear</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="furtherTesting">Further testing required?</label>
-                    <select
-                      id="furtherTesting"
-                      value={evaluation.furtherTesting}
-                      onChange={(e) =>
-                        setEvaluation((prev) => ({
-                          ...prev,
-                          furtherTesting: e.target.value as EvaluationState['furtherTesting'],
-                        }))
-                      }
-                    >
-                      <option value="no">No</option>
-                      <option value="yes">Yes</option>
-                    </select>
-                  </div>
-                </div>
-
-                <label htmlFor="conclusion">Auditor conclusion (required)</label>
-                <textarea
-                  id="conclusion"
-                  rows={4}
-                  value={evaluation.conclusion}
-                  onChange={(e) =>
-                    setEvaluation((prev) => ({ ...prev, conclusion: e.target.value }))
-                  }
-                />
-
-                <label htmlFor="reviewerComments">Reviewer comments</label>
-                <textarea
-                  id="reviewerComments"
-                  rows={2}
-                  value={evaluation.reviewerComments}
-                  onChange={(e) =>
-                    setEvaluation((prev) => ({
-                      ...prev,
-                      reviewerComments: e.target.value,
-                    }))
-                  }
-                />
-
-                <div className="actions">
-                  <button type="button" className="ghost" onClick={() => {
-                    const exceptionCount = testing.filter((t) => t.exception).length
-                    const exceptionValue = testing.reduce(
-                      (sum, t) => sum + (t.exception ? t.exceptionValue : 0),
-                      0,
-                    )
-                    setEvaluation((prev) => ({ ...prev, exceptionCount, exceptionValue }))
-                    setError('')
-                  }}>
-                    Save testing results
-                  </button>
-                  <button type="button" className="ghost" onClick={() => {
-                    const exceptionCount = testing.filter((t) => t.exception).length
-                    const exceptionValue = testing.reduce(
-                      (sum, t) => sum + (t.exception ? t.exceptionValue : 0),
-                      0,
-                    )
-                    setEvaluation((prev) => ({ ...prev, exceptionCount, exceptionValue }))
-                    setError('')
-                  }}>
-                    Save evaluation
-                  </button>
-                  <button type="button" className="primary" onClick={openWorkingPaperPreview}>
-                    Preview working paper
+                <div className="actions finish-actions">
+                  <button
+                    type="button"
+                    className="primary wp-open-btn"
+                    onClick={openWorkingPaperPreview}
+                  >
+                    Open working paper →
                   </button>
                 </div>
               </section>
@@ -2562,7 +2265,8 @@ export default function App() {
           </main>
 
           <aside className="summary-panel" aria-label="Engagement summary">
-            <p className="rail-title">Live summary</p>
+            <p className="rail-title">At a glance</p>
+            <p className="next-hint">{nextStepHint}</p>
             <div className="summary-stack">
               <div>
                 <span>Transactions</span>
@@ -2583,7 +2287,7 @@ export default function App() {
                 </strong>
               </div>
               <div>
-                <span>Confirmed size</span>
+                <span>Sample size</span>
                 <strong>
                   {currentSectionIndex >= stepOrderIndex('selection')
                     ? sampleDesign.confirmedSize
@@ -2602,18 +2306,14 @@ export default function App() {
                 <span>Selected</span>
                 <strong>{selected.length || '—'}</strong>
               </div>
-              <div>
-                <span>Status</span>
-                <strong className="summary-status">{statusLabel}</strong>
-              </div>
             </div>
-            {configSnapshot && (
+            {(configSnapshot || canOpenWorkingPaper) && (
               <button
                 type="button"
                 className="primary summary-cta"
-                onClick={() => setScreen('workingPaper')}
+                onClick={openWorkingPaperPreview}
               >
-                Open working paper
+                Open working paper →
               </button>
             )}
           </aside>
@@ -2626,14 +2326,11 @@ export default function App() {
               className="ghost"
               onClick={() => setScreen('samplingWorkspace')}
             >
-              Back to Sampling Workspace
+              ← Back to work
             </button>
             <div className="wp-toolbar-actions">
               <button type="button" className="ghost" onClick={() => window.print()}>
-                Print
-              </button>
-              <button type="button" className="ghost" onClick={() => window.print()}>
-                Export PDF
+                Print / PDF
               </button>
               <button type="button" className="ghost" onClick={resetAll}>
                 New engagement
@@ -2648,7 +2345,7 @@ export default function App() {
                   !signOff.amendmentReviewerApproved
                 }
               >
-                {signOff.locked ? 'Confirm lock / amendment' : 'Generate / lock working paper'}
+                {signOff.locked ? 'Confirm lock' : 'Lock working paper'}
               </button>
             </div>
           </div>
@@ -2656,186 +2353,58 @@ export default function App() {
           <article className="working-paper">
             <header className="wp-masthead">
               <p className="wp-tool">Non-Statistical Audit Sampling Tool · v{TOOL_VERSION}</p>
-              <h1>Working Paper</h1>
+              <h1>Selected sample items</h1>
               <div className="wp-header-grid">
                 <p><strong>Client</strong><span>{engagement.clientName || '—'}</span></p>
                 <p><strong>Audit area</strong><span>{engagement.auditArea || '—'}</span></p>
                 <p><strong>Period</strong><span>{engagement.period || '—'}</span></p>
                 <p><strong>WP reference</strong><span>{engagement.wpReference || '—'}</span></p>
+                <p><strong>File</strong><span>{ledger?.fileName || '—'}</span></p>
+                <p><strong>Worksheet</strong><span>{ledger?.sheets[sheetIndex]?.name || '—'}</span></p>
                 <p><strong>Prepared by</strong><span>{signOff.preparedBy || '—'}</span></p>
-                <p><strong>Reviewed by</strong><span>{signOff.reviewedBy || '—'}</span></p>
                 <p><strong>Date</strong><span>{signOff.preparedDate || todayIsoDate()}</span></p>
               </div>
             </header>
 
             <section>
-              <h2>1. Audit information</h2>
-              <p><strong>Objective:</strong> {engagement.objective || '—'}</p>
-              <p><strong>Sampling unit:</strong> {engagement.samplingUnit || '—'}</p>
-              <p><strong>File source:</strong> {ledger?.fileName || '—'}</p>
-              <p><strong>File hash:</strong> {ledger?.fileHash || '—'}</p>
-              <p><strong>Extracted data hash:</strong> {dataHash || '—'}</p>
-              <p><strong>Worksheet:</strong> {ledger?.sheets[sheetIndex]?.name || '—'}</p>
-              <p>
-                <strong>Header row confirmed:</strong> Row {headerRow + 1} ·{' '}
-                <strong>Data range:</strong> {dataStart + 1}–{dataEnd + 1} ·{' '}
-                <strong>Mapping confirmed:</strong> {transactions.length > 0 ? 'Yes' : 'No'}
-              </p>
-            </section>
-
-            <section>
-              <h2>2. Population / transaction information</h2>
-              <p><strong>Confirmed transaction count:</strong> {activePop.length}</p>
-              {designInputs.sampleSizePath === 'pathB' && (
-                <p><strong>Confirmed total coverage value:</strong> {formatMoney(coverageTotal)}</p>
-              )}
-              <p>
-                <strong>Data-quality flags:</strong> totals {summary.flaggedTotals}, opening/
-                closing {summary.flaggedOpeningClosing}, zero/negative{' '}
-                {summary.flaggedZeroNegative}, duplicates {summary.flaggedDuplicates}
-              </p>
-            </section>
-
-            <section>
-              <h2>3. Sample-size basis</h2>
-              {designInputs.sampleSizePath === 'pathA' ? (
-                <p>
-                  Path A — risk {designInputs.pathA.riskLevel}, expected error{' '}
-                  {designInputs.pathA.expectedError}, other evidence{' '}
-                  {designInputs.pathA.otherEvidence}. Score basis:{' '}
-                  {sizeSuggestion.pathADetail
-                    ? `${sizeSuggestion.pathADetail.score} → size ${sizeSuggestion.pathADetail.matrixSize}`
-                    : '—'}. Confirmed size: {sampleDesign.confirmedSize}.
-                </p>
-              ) : (
-                <p>
-                  Path B — coverage value {formatMoney(coverageTotal)}
-                  {sizeSuggestion.pathBDetail
-                    ? `; tier ${sizeSuggestion.pathBDetail.tier}; ${Math.round(sizeSuggestion.pathBDetail.coveragePercent * 100)}%; required ${formatMoney(sizeSuggestion.pathBDetail.requiredCoverageValue)}; provisional size ${sizeSuggestion.pathBDetail.suggestedSampleSize}`
-                    : ''}. Final confirmed size: {sampleDesign.confirmedSize}.
-                </p>
-              )}
-              <p><strong>Rationale:</strong> {sampleDesign.sizeRationale || '—'}</p>
-            </section>
-
-            <section>
-              <h2>4. Selection method</h2>
-              <p>
-                Selected: {methodLabel(sampleDesign.selectedMethod)}
-                {sampleDesign.methodOverrideReason
-                  ? ` · Override: ${sampleDesign.methodOverrideReason}`
-                  : ''}
-              </p>
-              {selectionMeta ? (
-                <p>
-                  Timestamp {selectionMeta.timestamp}; tool {selectionMeta.toolVersion}; data
-                  hash {selectionMeta.dataHash}
-                  {selectionMeta.seed ? `; seed ${selectionMeta.seed}` : ''}
-                  {selectionMeta.rngAlgorithm ? `; RNG ${selectionMeta.rngAlgorithm}` : ''}
-                  {selectionMeta.interval != null ? `; interval ${selectionMeta.interval}` : ''}
-                  {selectionMeta.randomStart != null
-                    ? `; random start ${selectionMeta.randomStart}`
-                    : ''}
-                  {selectionMeta.blockStart != null
-                    ? `; block start ${selectionMeta.blockStart}`
-                    : ''}
-                  {selectionMeta.patternWarning
-                    ? `. Warning: ${selectionMeta.patternWarning}`
-                    : ''}
-                </p>
-              ) : (
-                <p>No selection meta recorded.</p>
-              )}
-            </section>
-
-            <section>
-              <h2>5. Selected transaction list</h2>
+              <h2>Selected elements ({selected.length})</h2>
               <div className="preview-table-wrap">
                 <table>
                   <thead>
                     <tr>
+                      <th>#</th>
                       <th>Date</th>
                       <th>Voucher No</th>
                       <th>Description</th>
                       <th>Debit</th>
                       <th>Credit</th>
-                      <th>Coverage</th>
-                      <th>Result</th>
-                      <th>Exception / comments</th>
+                      <th>Coverage amount</th>
                     </tr>
                   </thead>
                   <tbody>
                     {selected.length === 0 ? (
-                      <tr><td colSpan={8}>None.</td></tr>
+                      <tr><td colSpan={7}>None selected.</td></tr>
                     ) : (
-                      selected.map((t) => {
-                        const row = testing.find((x) => x.transactionId === t.id)
-                        return (
-                          <tr key={`wp-sel-${t.id}`}>
-                            <td>{t.date || '—'}</td>
-                            <td>{t.voucherNo || '—'}</td>
-                            <td>{t.description || '—'}</td>
-                            <td>{formatMoney(t.debit)}</td>
-                            <td>{formatMoney(t.credit)}</td>
-                            <td>{formatMoney(t.coverageAmount)}</td>
-                            <td>
-                              {row?.exception
-                                ? 'Exception'
-                                : row?.tested
-                                  ? 'Pass'
-                                  : '—'}
-                            </td>
-                            <td>
-                              {row?.exception
-                                ? `${formatMoney(row.exceptionValue)} ${row.nature} ${row.notes}`
-                                : row?.notes || '—'}
-                            </td>
-                          </tr>
-                        )
-                      })
+                      selected.map((t, index) => (
+                        <tr key={`wp-sel-${t.id}`}>
+                          <td>{index + 1}</td>
+                          <td>{t.date || '—'}</td>
+                          <td>{t.voucherNo || displayRowId(t)}</td>
+                          <td>{t.description || '—'}</td>
+                          <td>{formatMoney(t.debit)}</td>
+                          <td>{formatMoney(t.credit)}</td>
+                          <td>{formatMoney(t.coverageAmount)}</td>
+                        </tr>
+                      ))
                     )}
                   </tbody>
                 </table>
               </div>
             </section>
 
-            {designInputs.sampleSizePath === 'pathB' && (
-              <section>
-                <h2>6. Path B coverage summary</h2>
-                <p>
-                  Selected coverage:{' '}
-                  {formatMoney(pathBReview?.selectedCoverage ?? selectedCoverage)}
-                  <br />
-                  Coverage achieved:{' '}
-                  {pathBReview ? `${pathBReview.coverageAchievedPercent.toFixed(1)}%` : '—'}
-                  <br />
-                  Untested remainder:{' '}
-                  {pathBReview
-                    ? `${formatMoney(pathBReview.untestedValue)} / ${pathBReview.untestedCount} items`
-                    : '—'}
-                  <br />
-                  Auditor basis: {evaluation.untestedRemainderBasis || '—'}
-                </p>
-              </section>
-            )}
-
-            <section>
-              <h2>{designInputs.sampleSizePath === 'pathB' ? '7' : '6'}. Testing evaluation</h2>
-              <p>
-                Exceptions: {evaluation.exceptionCount} (
-                {formatMoney(evaluation.exceptionValue)}). Nature:{' '}
-                {evaluation.natureSummary || '—'}. Further testing:{' '}
-                {evaluation.furtherTesting}.
-              </p>
-              <p><strong>Conclusion:</strong> {evaluation.conclusion || '—'}</p>
-              {evaluation.reviewerComments && (
-                <p><strong>Reviewer comments:</strong> {evaluation.reviewerComments}</p>
-              )}
-            </section>
-
-            <section>
-              <h2>{designInputs.sampleSizePath === 'pathB' ? '8' : '7'}. Sign-off</h2>
-              <div className="form-grid grid-3 no-print-inputs">
+            <section className="no-print-inputs">
+              <h2>Sign-off</h2>
+              <div className="form-grid grid-3">
                 <div>
                   <label htmlFor="preparedBy">Prepared by</label>
                   <input
@@ -2898,45 +2467,9 @@ export default function App() {
                   />
                 </div>
               </div>
-
-              <label htmlFor="amendmentNote">Amendment note</label>
-              <textarea
-                id="amendmentNote"
-                rows={2}
-                value={signOff.amendmentNote}
-                onChange={(e) => {
-                  const note = e.target.value
-                  setSignOff((prev) => ({
-                    ...prev,
-                    amendmentNote: note,
-                    amendmentReviewerApproved:
-                      prev.locked && note !== prev.amendmentNote
-                        ? false
-                        : prev.amendmentReviewerApproved,
-                  }))
-                }}
-              />
-              {signOff.locked && signOff.amendmentNote.trim() && (
-                <label className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={signOff.amendmentReviewerApproved}
-                    onChange={(e) =>
-                      setSignOff((prev) => ({
-                        ...prev,
-                        amendmentReviewerApproved: e.target.checked,
-                      }))
-                    }
-                  />
-                  <span>Amendment reviewer approves changes after lock.</span>
-                </label>
-              )}
               <p>
                 <strong>Lock status:</strong>{' '}
                 {signOff.locked ? `Locked on ${signOff.lockDate || '—'}` : 'Not locked'}
-                {signOff.fileAssemblyDeadline
-                  ? ` · File assembly deadline ${signOff.fileAssemblyDeadline}`
-                  : ''}
               </p>
             </section>
           </article>

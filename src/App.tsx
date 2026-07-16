@@ -68,6 +68,7 @@ import {
 } from './lib/types'
 import './App.css'
 import { type MainScreenId } from './lib/navigation'
+import { NumberTextInput, SuggestField } from './components/FormFields'
 
 const STEPS: WizardStep[] = [
   'upload',
@@ -1644,18 +1645,15 @@ export default function App() {
                   </div>
                   <div>
                     <label htmlFor="auditArea">Audit area</label>
-                    <select
+                    <SuggestField
                       id="auditArea"
                       value={engagement.auditArea}
-                      onChange={(e) => {
+                      options={AUDIT_AREA_OPTIONS}
+                      onChange={(next) => {
                         invalidateFrom('planning')
-                        setEngagement((prev) => ({ ...prev, auditArea: e.target.value }))
+                        setEngagement((prev) => ({ ...prev, auditArea: next }))
                       }}
-                    >
-                      {AUDIT_AREA_OPTIONS.map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
                   <div>
                     <label htmlFor="period">Period</label>
@@ -1671,33 +1669,27 @@ export default function App() {
                   </div>
                   <div>
                     <label htmlFor="testType">Test type</label>
-                    <select
+                    <SuggestField
                       id="testType"
                       value={engagement.testType}
-                      onChange={(e) => {
+                      options={TEST_TYPE_OPTIONS}
+                      onChange={(next) => {
                         invalidateFrom('planning')
-                        setEngagement((prev) => ({ ...prev, testType: e.target.value }))
+                        setEngagement((prev) => ({ ...prev, testType: next }))
                       }}
-                    >
-                      {TEST_TYPE_OPTIONS.map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
                   <div>
                     <label htmlFor="assertion">Assertion</label>
-                    <select
+                    <SuggestField
                       id="assertion"
                       value={engagement.assertion}
-                      onChange={(e) => {
+                      options={ASSERTION_OPTIONS}
+                      onChange={(next) => {
                         invalidateFrom('planning')
-                        setEngagement((prev) => ({ ...prev, assertion: e.target.value }))
+                        setEngagement((prev) => ({ ...prev, assertion: next }))
                       }}
-                    >
-                      {ASSERTION_OPTIONS.map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
                 </div>
 
@@ -1852,17 +1844,15 @@ export default function App() {
                         Enter the percentage of total ledger value you need to cover. The tool will automatically select the highest-value transactions until this target is reached.
                       </p>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <input
+                        <NumberTextInput
                           id="pathBCoveragePct"
-                          type="number"
                           min={1}
                           max={100}
-                          step={1}
+                          emptyAs={50}
                           style={{ width: '110px' }}
                           value={designInputs.pathBCoveragePercent}
-                          onChange={(e) => {
+                          onValueChange={(v) => {
                             invalidateFrom('planning')
-                            const v = Math.min(100, Math.max(1, Number(e.target.value) || 50))
                             setDesignInputs((prev) => ({ ...prev, pathBCoveragePercent: v }))
                           }}
                         />
@@ -2028,18 +2018,18 @@ export default function App() {
                 )}
 
                 <label htmlFor="confirmedSize">Final confirmed sample size</label>
-                <input
+                <NumberTextInput
                   id="confirmedSize"
-                  type="number"
                   min={1}
                   max={Math.max(1, activePop.length)}
+                  emptyAs={1}
                   value={sampleDesign.confirmedSize}
                   disabled={designInputs.sampleSizePath === 'pathB'}
-                  onChange={(e) => {
+                  onValueChange={(v) => {
                     invalidateFrom('design')
                     setSampleDesign((prev) => ({
                       ...prev,
-                      confirmedSize: Number(e.target.value),
+                      confirmedSize: v,
                     }))
                     setSizeWarning('')
                   }}
@@ -2148,15 +2138,15 @@ export default function App() {
                 {sampleDesign.selectedMethod === 'block' && (
                   <>
                     <label htmlFor="blockStart">Block start index (0-based)</label>
-                    <input
+                    <NumberTextInput
                       id="blockStart"
-                      type="number"
                       min={0}
                       max={Math.max(0, activePop.length - sampleDesign.confirmedSize)}
+                      emptyAs={0}
                       value={blockStart}
-                      onChange={(e) => {
+                      onValueChange={(v) => {
                         invalidateFrom('selection')
-                        setBlockStart(Number(e.target.value))
+                        setBlockStart(v)
                       }}
                     />
                     <label htmlFor="blockRationale">Rationale for block selection</label>

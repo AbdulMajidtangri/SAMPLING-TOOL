@@ -417,12 +417,17 @@ textarea {
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
-input:focus,
-select:focus,
-textarea:focus {
-  outline: none;
-  border-color: #8eb8bd;
-  box-shadow: 0 0 0 3px rgba(15, 92, 99, 0.12);
+input[list] {
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) calc(50% - 3px),
+    calc(100% - 11px) calc(50% - 3px);
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 28px;
 }
 
 textarea {

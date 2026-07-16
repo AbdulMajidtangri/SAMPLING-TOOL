@@ -27,6 +27,7 @@ import {
   selectHaphazard,
   selectRandom,
   selectSystematic,
+  runPathBSelection,
 } from './lib/selection'
 import {
   ASSERTION_OPTIONS,
@@ -159,6 +160,7 @@ function defaultDesignInputs(): DesignInputs {
     tolerableError: '',
     sampleSizePath: 'pathA',
     pathA: { riskLevel: 3, expectedError: 2, otherEvidence: 2 },
+    pathBCoveragePercent: 50,
   }
 }
 
@@ -306,11 +308,13 @@ export default function App() {
       path: designInputs.sampleSizePath,
       pathA: designInputs.pathA,
       transactions: activePop,
+      pathBCoveragePct: designInputs.pathBCoveragePercent,
     })
   }, [
     activePop,
     designInputs.sampleSizePath,
     designInputs.pathA,
+    designInputs.pathBCoveragePercent,
   ])
 
   const dateHeaderPresent = useMemo(
@@ -565,6 +569,10 @@ export default function App() {
       setError(result.errors[0])
       return
     }
+    if (result.transactions.length === 0) {
+      setError('Uploaded ledger has no data rows.')
+      return
+    }
 
     // Keep needsCoverageResolution rows for auditor resolution on confirm step.
     invalidateFrom('mapping')
@@ -702,11 +710,16 @@ export default function App() {
       path: designInputs.sampleSizePath,
       pathA: designInputs.pathA,
       transactions: pop,
+      pathBCoveragePct: designInputs.pathBCoveragePercent,
     })
+    
+    const isPathB = designInputs.sampleSizePath === 'pathB'
+    const finalMethod = isPathB ? 'valueCoverage' : recommendation.recommended
+
     setSampleDesign({
-      ...defaultSampleDesign(recommendation.recommended),
-      recommendedMethod: recommendation.recommended,
-      selectedMethod: recommendation.recommended,
+      ...defaultSampleDesign(finalMethod),
+      recommendedMethod: finalMethod,
+      selectedMethod: finalMethod,
       suggestedSize: suggestion.suggestedSize,
       confirmedSize: suggestion.suggestedSize,
       coveragePercentUsed: suggestion.coveragePercent,
@@ -838,8 +851,22 @@ export default function App() {
         outcome = selectSystematic(pop, size)
       } else if (method === 'block') {
         outcome = selectBlock(pop, size, blockStart, blockRationale)
-      } else {
+      } else if (method === 'haphazard') {
         outcome = selectHaphazard(pop, haphazardIds, haphazardBiasConfirmed)
+      } else if (method === 'valueCoverage') {
+        const selected = runPathBSelection(pop, designInputs.pathBCoveragePercent)
+        outcome = {
+          selected,
+          meta: {
+            method: 'valueCoverage',
+            timestamp: new Date().toISOString(),
+            toolVersion: TOOL_VERSION,
+            dataHash: hashExtractedData(pop),
+            selectedIds: selected.map((t) => t.id),
+          },
+        }
+      } else {
+        throw new Error(`Unknown selection method: ${method}`)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Selection failed.')
@@ -1816,10 +1843,38 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <p className="hint">
-                    Path B uses confirmed coverage value, tier rules, floor, and minimum item
-                    count. The provisional pass only suggests sample size.
-                  </p>
+                  <div className="form-grid grid-1" style={{ marginTop: '10px' }}>
+                    <div>
+                      <label htmlFor="pathBCoveragePct" style={{ fontWeight: 600 }}>
+                        Coverage target (%) — required
+                      </label>
+                      <p className="hint" style={{ marginBottom: '6px' }}>
+                        Enter the percentage of total ledger value you need to cover. The tool will automatically select the highest-value transactions until this target is reached.
+                      </p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <input
+                          id="pathBCoveragePct"
+                          type="number"
+                          min={1}
+                          max={100}
+                          step={1}
+                          style={{ width: '110px' }}
+                          value={designInputs.pathBCoveragePercent}
+                          onChange={(e) => {
+                            invalidateFrom('planning')
+                            const v = Math.min(100, Math.max(1, Number(e.target.value) || 50))
+                            setDesignInputs((prev) => ({ ...prev, pathBCoveragePercent: v }))
+                          }}
+                        />
+                        <span style={{ fontWeight: 600, fontSize: '1.05rem' }}>%</span>
+                        {coverageTotal > 0 && (
+                          <span className="hint" style={{ margin: 0 }}>
+                            → target: <strong>{formatMoney((designInputs.pathBCoveragePercent / 100) * coverageTotal)}</strong> of {formatMoney(coverageTotal)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 )}
 
                 <div className="form-grid grid-2">
@@ -1905,12 +1960,19 @@ export default function App() {
                 <select
                   id="selectedMethod"
                   value={sampleDesign.selectedMethod}
+                  disabled={designInputs.sampleSizePath === 'pathB'}
                   onChange={(e) => updateDesignMethod(e.target.value as SelectionMethod)}
                 >
-                  <option value="random">Random</option>
-                  <option value="systematic">Systematic</option>
-                  <option value="haphazard">Haphazard / Manual</option>
-                  <option value="block">Block</option>
+                  {designInputs.sampleSizePath === 'pathB' ? (
+                    <option value="valueCoverage">Value-Based Coverage Selection</option>
+                  ) : (
+                    <>
+                      <option value="random">Random</option>
+                      <option value="systematic">Systematic</option>
+                      <option value="haphazard">Haphazard / Manual</option>
+                      <option value="block">Block</option>
+                    </>
+                  )}
                 </select>
 
                 {sampleDesign.selectedMethod !== sampleDesign.recommendedMethod && (
@@ -1961,11 +2023,7 @@ export default function App() {
 
                 {designInputs.sampleSizePath === 'pathB' && sizeSuggestion.pathBDetail && (
                   <p className="hint">
-                    Path B tier {sizeSuggestion.pathBDetail.tier}:{' '}
-                    {Math.round(sizeSuggestion.pathBDetail.coveragePercent * 100)}% coverage
-                    requires {formatMoney(sizeSuggestion.pathBDetail.requiredCoverageValue)}{' '}
-                    (provisional {sizeSuggestion.pathBDetail.suggestedSampleSize} items — not
-                    final selection).
+                    Path B: 50% coverage requires {formatMoney(sizeSuggestion.pathBDetail.requiredCoverageValue)} (determines exact final selection of {sizeSuggestion.pathBDetail.suggestedSampleSize} items).
                   </p>
                 )}
 
@@ -1976,6 +2034,7 @@ export default function App() {
                   min={1}
                   max={Math.max(1, activePop.length)}
                   value={sampleDesign.confirmedSize}
+                  disabled={designInputs.sampleSizePath === 'pathB'}
                   onChange={(e) => {
                     invalidateFrom('design')
                     setSampleDesign((prev) => ({
@@ -2073,6 +2132,12 @@ export default function App() {
                   </div>
                 </div>
 
+                {sampleDesign.selectedMethod === 'valueCoverage' && (
+                  <div className="banner info" style={{ backgroundColor: '#e8f0fe', color: '#1a73e8', padding: '12px', borderRadius: '6px', marginBottom: '15px', border: '1px solid #d2e3fc' }}>
+                    <strong>Deterministic Value-Based Coverage Selection:</strong> This will select the highest value transactions (amount descending, tie-breaking with Risk Level High &rarr; Medium &rarr; Low) to achieve at least 50% coverage of the total ledger value.
+                  </div>
+                )}
+
                 {sampleDesign.selectedMethod === 'systematic' && (
                   <div className="banner warn">
                     Systematic selection may follow a periodicity pattern. Review for pattern
@@ -2160,24 +2225,35 @@ export default function App() {
                   <>
                     <h3>Selected transactions ({selected.length})</h3>
                     {designInputs.sampleSizePath === 'pathB' && pathBReview && (
-                      <div className="stat-grid">
-                        <div>
-                          <span>Selected coverage</span>
-                          <strong>{formatMoney(pathBReview.selectedCoverage)}</strong>
+                      <>
+                        <div className="stat-grid">
+                          <div>
+                            <span>Selected coverage</span>
+                            <strong>{formatMoney(pathBReview.selectedCoverage)}</strong>
+                          </div>
+                          <div>
+                            <span>Coverage achieved</span>
+                            <strong>{pathBReview.coverageAchievedPercent.toFixed(1)}%</strong>
+                          </div>
+                          <div>
+                            <span>Untested remainder value</span>
+                            <strong>{formatMoney(pathBReview.untestedValue)}</strong>
+                          </div>
+                          <div>
+                            <span>Untested remainder count</span>
+                            <strong>{pathBReview.untestedCount}</strong>
+                          </div>
                         </div>
-                        <div>
-                          <span>Coverage achieved</span>
-                          <strong>{pathBReview.coverageAchievedPercent.toFixed(1)}%</strong>
-                        </div>
-                        <div>
-                          <span>Untested remainder value</span>
-                          <strong>{formatMoney(pathBReview.untestedValue)}</strong>
-                        </div>
-                        <div>
-                          <span>Untested remainder count</span>
-                          <strong>{pathBReview.untestedCount}</strong>
-                        </div>
-                      </div>
+                        {pathBReview.coverageAchievedPercent >= designInputs.pathBCoveragePercent ? (
+                          <div className="banner success" style={{ backgroundColor: '#e6f4ea', color: '#137333', padding: '10px', borderRadius: '4px', marginBottom: '15px', border: '1px solid #ceead6' }}>
+                            ✓ Confirmed: Selection meets the {designInputs.pathBCoveragePercent}% monetary coverage target (Achieved: {pathBReview.coverageAchievedPercent.toFixed(1)}%).
+                          </div>
+                        ) : (
+                          <div className="banner error" style={{ backgroundColor: '#fce8e6', color: '#c5221f', padding: '10px', borderRadius: '4px', marginBottom: '15px', border: '1px solid #fad2cf' }}>
+                            ✗ Warning: Selection does not meet the {designInputs.pathBCoveragePercent}% monetary coverage target (Achieved: {pathBReview.coverageAchievedPercent.toFixed(1)}%).
+                          </div>
+                        )}
+                      </>
                     )}
                     <div className="preview-table-wrap">
                       <table>
@@ -2189,6 +2265,7 @@ export default function App() {
                             <th>Debit</th>
                             <th>Credit</th>
                             <th>Coverage</th>
+                            {designInputs.sampleSizePath === 'pathB' && <th>Risk Level</th>}
                           </tr>
                         </thead>
                         <tbody>
@@ -2200,6 +2277,7 @@ export default function App() {
                               <td>{formatMoney(t.debit)}</td>
                               <td>{formatMoney(t.credit)}</td>
                               <td>{formatMoney(t.coverageAmount)}</td>
+                              {designInputs.sampleSizePath === 'pathB' && <td>{t.riskLevel || '—'}</td>}
                             </tr>
                           ))}
                         </tbody>
@@ -2245,6 +2323,7 @@ export default function App() {
                         <th>Debit</th>
                         <th>Credit</th>
                         <th>Coverage</th>
+                        {designInputs.sampleSizePath === 'pathB' && <th>Risk Level</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -2257,6 +2336,7 @@ export default function App() {
                           <td>{formatMoney(t.debit)}</td>
                           <td>{formatMoney(t.credit)}</td>
                           <td>{formatMoney(t.coverageAmount)}</td>
+                          {designInputs.sampleSizePath === 'pathB' && <td>{t.riskLevel || '—'}</td>}
                         </tr>
                       ))}
                     </tbody>
@@ -2480,6 +2560,16 @@ export default function App() {
               {sampleDesign.sizeRationale ? (
                 <p><strong>Auditor note on extent:</strong> {sampleDesign.sizeRationale}</p>
               ) : null}
+              {designInputs.sampleSizePath === 'pathB' && (
+                <div style={{ marginTop: '12px', padding: '12px', border: '1px solid #ceead6', borderRadius: '6px', backgroundColor: '#e6f4ea', color: '#137333' }}>
+                  <p style={{ margin: '0 0 6px 0' }}><strong>Path B Value-Based Coverage Metrics:</strong></p>
+                  <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                    <li><strong>Total Coverage Amount:</strong> {formatMoney(selectedCoverage)}</li>
+                    <li><strong>Coverage Percentage:</strong> {coverageTotal > 0 ? ((selectedCoverage / coverageTotal) * 100).toFixed(1) : '0.0'}%</li>
+                    <li><strong>Confirmation:</strong> {coverageTotal > 0 && ((selectedCoverage / coverageTotal) * 100) >= 50 ? '✓ Confirmed: meets the 50% minimum monetary coverage requirement.' : '✗ Warning: does not meet the 50% minimum monetary coverage requirement.'}</li>
+                  </ul>
+                </div>
+              )}
             </section>
 
             <section>
@@ -2500,11 +2590,12 @@ export default function App() {
                       <th>Debit</th>
                       <th>Credit</th>
                       <th>Coverage amount</th>
+                      {designInputs.sampleSizePath === 'pathB' && <th>Risk Level</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {selected.length === 0 ? (
-                      <tr><td colSpan={7}>None selected.</td></tr>
+                      <tr><td colSpan={designInputs.sampleSizePath === 'pathB' ? 8 : 7}>None selected.</td></tr>
                     ) : (
                       selected.map((t, index) => (
                         <tr key={`wp-sel-${t.id}`}>
@@ -2515,6 +2606,7 @@ export default function App() {
                           <td>{formatMoney(t.debit)}</td>
                           <td>{formatMoney(t.credit)}</td>
                           <td>{formatMoney(t.coverageAmount)}</td>
+                          {designInputs.sampleSizePath === 'pathB' && <td>{t.riskLevel || '—'}</td>}
                         </tr>
                       ))
                     )}

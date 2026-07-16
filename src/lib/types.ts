@@ -18,10 +18,11 @@ export type StandardField =
   | 'debit'
   | 'credit'
   | 'amount'
+  | 'riskLevel'
 
 export type MappingConfidence = 'high' | 'medium' | 'low' | 'none'
 
-export type SelectionMethod = 'random' | 'systematic' | 'haphazard' | 'block'
+export type SelectionMethod = 'random' | 'systematic' | 'haphazard' | 'block' | 'valueCoverage'
 
 export type SampleSizePath = 'pathA' | 'pathB'
 
@@ -89,6 +90,7 @@ export interface LedgerTransaction {
   coverageResolution?: CoverageResolution
   highValue: boolean
   stratumKey: string
+  riskLevel: 'Low' | 'Medium' | 'High'
   extras: Record<string, string>
 }
 
@@ -135,6 +137,8 @@ export interface DesignInputs {
   tolerableError: string
   sampleSizePath: SampleSizePath
   pathA: PathAInputs
+  /** Path B: auditor-specified coverage target as a percentage (1–100) */
+  pathBCoveragePercent: number
 }
 
 export interface PathAInputs {
@@ -256,6 +260,7 @@ export const STANDARD_FIELD_LABELS: Record<StandardField, string> = {
   debit: 'Debit',
   credit: 'Credit',
   amount: 'Amount (alt. if no Debit/Credit)',
+  riskLevel: 'Risk Level (optional - Low/Medium/High)',
 }
 
 /** Date is required only when a date-like header exists on the sheet. */
@@ -269,6 +274,7 @@ export const MAPPING_FIELD_ORDER: StandardField[] = [
   'credit',
   'accountNo',
   'amount',
+  'riskLevel',
 ]
 
 export const POSITIONAL_FIELD_ORDER: StandardField[] = [

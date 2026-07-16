@@ -16,7 +16,7 @@ import {
   suggestSampleSizeForPath,
   validateSampleSizeOverride,
 } from './sampleSize'
-import { selectRandom, selectSystematic, selectBlock } from './selection'
+import { selectRandom, selectSystematic, selectBlock, runPathBSelection } from './selection'
 import type { LedgerTransaction, StandardField } from './types'
 
 function mapOf(
@@ -305,19 +305,43 @@ describe('sample size paths', () => {
     expect(r.finalSize).toBe(40)
   })
 
-  it('Path B: value coverage suggests item count from tiers', () => {
+  it('Path B: value coverage suggests item count from 50% target', () => {
     const pop = Array.from({ length: 40 }, (_, i) =>
       tx({
         id: `R${i}`,
         rowIndex: i,
         coverageAmount: 20_000,
         debit: 20_000,
+        riskLevel: 'Low',
       }),
     )
-    // total 800_000 → tier 2 @ 60% min 500k → need 500k → 25 items of 20k
+    // total 800_000 → target 400_000 → need 20 items of 20k
     const b = pathBSizing(pop)
-    expect(b.tier).toBe(2)
-    expect(b.suggestedSampleSize).toBeGreaterThanOrEqual(15)
+    expect(b.suggestedSampleSize).toBe(20)
+    expect(b.provisionalCoverageValue).toBe(400_000)
+  })
+
+  it('Path B: single transaction rule applies when one item is >= 50%', () => {
+    const pop = [
+      tx({ id: 'R1', coverageAmount: 60_000, debit: 60_000, riskLevel: 'Low' }),
+      tx({ id: 'R2', coverageAmount: 30_000, debit: 30_000, riskLevel: 'Low' }),
+      tx({ id: 'R3', coverageAmount: 10_000, debit: 10_000, riskLevel: 'Low' }),
+    ]
+    // Total = 100k, Target = 50k. R1 (60k) >= 50k, so select ONLY R1
+    const selected = runPathBSelection(pop)
+    expect(selected.map((t) => t.id)).toEqual(['R1'])
+  })
+
+  it('Path B: sorts descending and breaks ties by Risk Level (High -> Medium -> Low)', () => {
+    const pop = [
+      tx({ id: 'R1', coverageAmount: 20_000, debit: 20_000, riskLevel: 'Low' }),
+      tx({ id: 'R2', coverageAmount: 20_000, debit: 20_000, riskLevel: 'High' }),
+      tx({ id: 'R3', coverageAmount: 20_000, debit: 20_000, riskLevel: 'Medium' }),
+    ]
+    // Total = 60k, Target = 30k. Sorted order: R2 (High), R3 (Med), R1 (Low).
+    // Target = 30k requires 2 items (R2 + R3 = 40k)
+    const selected = runPathBSelection(pop)
+    expect(selected.map((t) => t.id)).toEqual(['R2', 'R3'])
   })
 
   it('suggestSampleSizeForPath routes to Path A or B', () => {

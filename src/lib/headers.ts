@@ -78,6 +78,14 @@ export const SYNONYMS: Record<StandardField, string[]> = {
     'grossamount',
     'localamount',
   ],
+  riskLevel: [
+    'risklevel',
+    'risk',
+    'riskclassification',
+    'riskscore',
+    'riskcategory',
+    'classification',
+  ],
 }
 
 export function normalizeHeader(value: string): string {

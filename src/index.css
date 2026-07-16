@@ -1,24 +1,3 @@
-:root {
-  color-scheme: light;
-  --bg: #f7f5f1;
-  --ink: #1a1a1a;
-  --muted: #667085;
-  --line: #e4e1da;
-  --card: #ffffff;
-  --accent: #0b5fff;
-  --accent-ink: #ffffff;
-  --warn-bg: #fff8e8;
-  --warn-ink: #8a5a00;
-  --error-bg: #fff1f0;
-  --error-ink: #b42318;
-  --ok: #067647;
-  --shadow: 0 10px 30px rgba(16, 24, 40, 0.06);
-  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
-  color: var(--ink);
-  background: var(--bg);
-  line-height: 1.45;
-}
-
 * {
   box-sizing: border-box;
 }
@@ -32,15 +11,4 @@ body,
 
 body {
   min-width: 320px;
-}
-
-button,
-input,
-select,
-textarea {
-  font: inherit;
-}
-
-button {
-  cursor: pointer;
 }

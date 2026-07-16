@@ -15,21 +15,28 @@ npm run dev
 npm test
 ```
 
-## Flow
+## Two-screen flow
 
-1. Upload ledger  
-2. Choose worksheet  
-3. Headers & column mapping (required confirmation; editable data range; hard-stop mapping errors)  
-4. Confirm population (count & coverage value; Debit/Credit resolution; exclusions with reason)  
-5. Planning inputs (objective, assertion, test type, sampling unit, error definition, Path A/B)  
-6. Method recommendation + approval/override, sample size rationale, sampling-risk acknowledgement  
-7. Generate sample on the active population  
-8. Testing results (Path B coverage review / untested remainder; §20 removal forces re-selection)  
-9. Working paper (mapping summary, confirmed count/value, config snapshot JSON, sign-off / lock / amendment)
+The app has **only two main screens**:
+
+1. **Sampling Workspace** — all auditor work in one place (upload, mapping, data quality, audit info, sample size, selection, testing, evaluation)
+2. **Working Paper** — preview, print/export, and sign-off only (no recalculation or selection)
+
+Top navigation: `Sampling Workspace | Working Paper`
+
+## Workspace sections (Screen 1)
+
+1. Ledger upload (worksheet + file)
+2. Headers & column mapping (confidence + required confirmation)
+3. Data quality (flags, Debit/Credit resolution, population confirm)
+4. Audit information + Path A / Path B
+5. Sample size confirmation (hard stop before item selection)
+6. Selection method (exact confirmed size)
+7. Testing results & evaluation → Preview working paper
 
 ## Sample size — two paths
 
-- **Path A (risk matrix):** risk + expected error + other evidence → firm matrix size (capped at population). Coverage % rules are not mixed into Path A.
-- **Path B (value coverage):** monetary tier % of population value → suggested item count. Selection method still chooses *which* items. Blocked when total coverage value is zero. After selection, coverage vs required is reviewed (§13.8); shortfalls need size increase / re-run or documented acceptance.
+- **Path A (risk matrix):** risk + expected error + other evidence → firm matrix size (capped at population).
+- **Path B (value coverage):** monetary tier % → suggested item count via provisional sizing (not final selection). Selection method still chooses *which* items.
 
-Auditor picks the path at Planning. Sample size is confirmed before item selection. No statistical confidence levels are calculated.
+No statistical confidence levels are calculated.

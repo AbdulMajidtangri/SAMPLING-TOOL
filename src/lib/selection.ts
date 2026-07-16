@@ -172,5 +172,49 @@ export function methodLabel(method: SelectionMethod): string {
       return 'Haphazard / Manual'
     case 'block':
       return 'Block'
+    case 'valueCoverage':
+      return 'Value-Based Coverage Selection'
   }
+}
+
+export function runPathBSelection(
+  transactions: LedgerTransaction[],
+  coveragePct = 50,
+): LedgerTransaction[] {
+  if (transactions.length === 0) return []
+  const clampedPct = Math.min(100, Math.max(1, coveragePct))
+  const total = transactions.reduce((sum, t) => sum + Math.abs(t.coverageAmount), 0)
+  const target = (clampedPct / 100) * total
+
+  // Sort: descending by absolute coverageAmount, then High -> Medium -> Low
+  const sorted = [...transactions].sort((a, b) => {
+    const amtA = Math.abs(a.coverageAmount)
+    const amtB = Math.abs(b.coverageAmount)
+    if (amtA !== amtB) {
+      return amtB - amtA
+    }
+    const riskVal = (r?: string) => {
+      const l = (r || '').toLowerCase()
+      if (l.includes('high')) return 3
+      if (l.includes('medium') || l.includes('med')) return 2
+      return 1
+    }
+    return riskVal(b.riskLevel) - riskVal(a.riskLevel)
+  })
+
+  // Single transaction rule: if top item alone meets target, take only it
+  if (sorted.length > 0 && total > 0 && Math.abs(sorted[0].coverageAmount) >= target) {
+    return [sorted[0]]
+  }
+
+  const selected: LedgerTransaction[] = []
+  let running = 0
+  for (const item of sorted) {
+    selected.push(item)
+    running += Math.abs(item.coverageAmount)
+    if (running >= target) {
+      break
+    }
+  }
+  return selected
 }

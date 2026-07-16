@@ -2416,8 +2416,8 @@ export default function App() {
               ← Back to work
             </button>
             <div className="wp-toolbar-actions">
-              <button type="button" className="ghost" onClick={() => window.print()}>
-                Print / PDF
+              <button type="button" className="primary" onClick={() => window.print()}>
+                Print / Save as PDF
               </button>
               <button type="button" className="ghost" onClick={resetAll}>
                 New engagement
@@ -2532,81 +2532,86 @@ export default function App() {
 
             <section>
               <h2>4. Preparation and review (ISA 230.9(b)–(c))</h2>
-              <div className="form-grid grid-2 no-print-inputs">
-                <div>
-                  <label htmlFor="preparedBy">Prepared by (who performed the work)</label>
-                  <input
-                    id="preparedBy"
-                    value={signOff.preparedBy}
-                    onChange={(e) =>
-                      setSignOff((prev) => ({
-                        ...prev,
-                        preparedBy: e.target.value,
-                        reviewStatus:
-                          prev.reviewStatus === 'draft' ? 'prepared' : prev.reviewStatus,
-                        preparedDate: prev.preparedDate || todayIsoDate(),
-                      }))
-                    }
-                  />
+              <div className="screen-only">
+                <div className="form-grid grid-2">
+                  <div>
+                    <label htmlFor="preparedBy">Prepared by (who performed the work)</label>
+                    <input
+                      id="preparedBy"
+                      value={signOff.preparedBy}
+                      onChange={(e) =>
+                        setSignOff((prev) => ({
+                          ...prev,
+                          preparedBy: e.target.value,
+                          reviewStatus:
+                            prev.reviewStatus === 'draft' ? 'prepared' : prev.reviewStatus,
+                          preparedDate: prev.preparedDate || todayIsoDate(),
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="preparedDate">Date work completed</label>
+                    <input
+                      id="preparedDate"
+                      type="date"
+                      value={signOff.preparedDate}
+                      onChange={(e) =>
+                        setSignOff((prev) => ({ ...prev, preparedDate: e.target.value }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="reviewedBy">Reviewed by</label>
+                    <input
+                      id="reviewedBy"
+                      value={signOff.reviewedBy}
+                      onChange={(e) =>
+                        setSignOff((prev) => ({
+                          ...prev,
+                          reviewedBy: e.target.value,
+                          reviewStatus: e.target.value.trim()
+                            ? 'reviewed'
+                            : prev.preparedBy
+                              ? 'prepared'
+                              : 'draft',
+                          reviewedDate: prev.reviewedDate || todayIsoDate(),
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="reviewedDate">Date of review</label>
+                    <input
+                      id="reviewedDate"
+                      type="date"
+                      value={signOff.reviewedDate}
+                      onChange={(e) =>
+                        setSignOff((prev) => ({ ...prev, reviewedDate: e.target.value }))
+                      }
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label htmlFor="preparedDate">Date work completed</label>
-                  <input
-                    id="preparedDate"
-                    type="date"
-                    value={signOff.preparedDate}
-                    onChange={(e) =>
-                      setSignOff((prev) => ({ ...prev, preparedDate: e.target.value }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label htmlFor="reviewedBy">Reviewed by</label>
-                  <input
-                    id="reviewedBy"
-                    value={signOff.reviewedBy}
-                    onChange={(e) =>
-                      setSignOff((prev) => ({
-                        ...prev,
-                        reviewedBy: e.target.value,
-                        reviewStatus: e.target.value.trim()
-                          ? 'reviewed'
-                          : prev.preparedBy
-                            ? 'prepared'
-                            : 'draft',
-                        reviewedDate: prev.reviewedDate || todayIsoDate(),
-                      }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label htmlFor="reviewedDate">Date of review</label>
-                  <input
-                    id="reviewedDate"
-                    type="date"
-                    value={signOff.reviewedDate}
-                    onChange={(e) =>
-                      setSignOff((prev) => ({ ...prev, reviewedDate: e.target.value }))
-                    }
-                  />
-                </div>
+                <label htmlFor="reviewExtent">Extent of review</label>
+                <textarea
+                  id="reviewExtent"
+                  rows={2}
+                  value={signOff.reviewExtent}
+                  onChange={(e) =>
+                    setSignOff((prev) => ({ ...prev, reviewExtent: e.target.value }))
+                  }
+                />
               </div>
-              <label htmlFor="reviewExtent">Extent of review</label>
-              <textarea
-                id="reviewExtent"
-                rows={2}
-                value={signOff.reviewExtent}
-                onChange={(e) =>
-                  setSignOff((prev) => ({ ...prev, reviewExtent: e.target.value }))
-                }
-              />
+              <p className="print-only wp-print-extent">
+                <strong>Extent of review:</strong> {signOff.reviewExtent || '—'}
+              </p>
               <p className="wp-assembly">
                 <strong>File assembly (ISA 230):</strong> assemble the final audit file on
                 a timely basis after the date of the auditor’s report.
               </p>
             </section>
 
-            <footer className="wp-footer">
+            <footer className="wp-footer screen-only">
               Tool version {TOOL_VERSION}
               {configSnapshot ? ` · Config captured ${configSnapshot.capturedAt}` : ''}
             </footer>

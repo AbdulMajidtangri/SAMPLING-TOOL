@@ -1041,6 +1041,26 @@ th {
 }
 
 @media print {
+  @page {
+    size: A4;
+    margin: 18mm 14mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .screen-only {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
   .app-topbar,
   .wp-toolbar,
   .no-print,
@@ -1049,21 +1069,99 @@ th {
     display: none !important;
   }
 
+  .app-shell {
+    min-height: auto;
+  }
+
   .wp-screen {
     padding: 0;
     max-width: none;
+    margin: 0;
   }
 
   .working-paper {
     border: none;
     box-shadow: none;
     padding: 0;
+    border-radius: 0;
+    font-size: 10pt;
+    color: #000;
   }
 
-  .no-print-inputs input,
-  .no-print-inputs select,
-  .no-print-inputs textarea {
-    border: none;
-    padding-left: 0;
+  .wp-masthead {
+    margin-bottom: 14px;
+    padding-bottom: 12px;
   }
+
+  .working-paper h1 {
+    font-size: 16pt;
+  }
+
+  .working-paper h2 {
+    font-size: 11pt;
+    margin-top: 16px;
+    page-break-after: avoid;
+  }
+
+  .working-paper section {
+    page-break-inside: avoid;
+  }
+
+  .working-paper section:has(.wp-table) {
+    page-break-inside: auto;
+  }
+
+  .wp-id-table th,
+  .wp-id-table td {
+    padding: 5px 8px;
+    font-size: 9pt;
+    border-color: #333;
+  }
+
+  .wp-id-table th {
+    background: #f0f0f0 !important;
+  }
+
+  .preview-table-wrap,
+  .wp-table {
+    overflow: visible !important;
+    border: 1px solid #333;
+    border-radius: 0;
+    max-height: none !important;
+    page-break-inside: auto;
+  }
+
+  .wp-table table thead {
+    display: table-header-group;
+  }
+
+  .wp-table table tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .wp-table th,
+  .wp-table td {
+    padding: 4px 6px;
+    font-size: 8.5pt;
+    border-color: #666;
+  }
+
+  .wp-table th {
+    background: #f0f0f0 !important;
+  }
+
+  .wp-print-extent {
+    margin: 8px 0 0;
+    font-size: 9.5pt;
+  }
+
+  .wp-assembly {
+    font-size: 9pt;
+    margin-top: 10px;
+  }
+}
+
+.print-only {
+  display: none;
 }

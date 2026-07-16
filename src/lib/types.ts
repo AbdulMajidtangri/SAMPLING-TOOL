@@ -115,12 +115,12 @@ export interface PopulationSummary {
 }
 
 export interface EngagementMeta {
+  /** Entered on the working paper screen, not in the wizard. */
   wpReference: string
   clientName: string
   auditArea: string
+  /** Entered on the working paper screen, not in the wizard. */
   period: string
-  testType: string
-  assertion: string
   objective: string
   samplingUnit: string
   errorDefinition: string

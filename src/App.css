@@ -916,6 +916,22 @@ th {
   background: var(--surface);
 }
 
+.wp-inline-input {
+  width: 100%;
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font: inherit;
+  background: var(--surface-muted);
+}
+
+.wp-inline-input:focus {
+  outline: none;
+  border-style: solid;
+  border-color: var(--accent, #4a6cf7);
+  background: var(--surface);
+}
+
 .working-paper h2 {
   margin: 22px 0 8px;
   font-size: 1rem;

@@ -106,13 +106,42 @@ function sectionDomId(step: WizardStep): string {
   return `section-${mapped}`
 }
 
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2
+}
+
+const SECTION_SCROLL_OFFSET_PX = 88
+const SECTION_SCROLL_DURATION_MS = 950
+
 function scrollToStepSection(step: WizardStep) {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      document.getElementById(sectionDomId(step))?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      })
+      const el = document.getElementById(sectionDomId(step))
+      if (!el) return
+
+      const prefersReducedMotion = window.matchMedia(
+        '(prefers-reduced-motion: reduce)',
+      ).matches
+      if (prefersReducedMotion) {
+        el.scrollIntoView({ behavior: 'auto', block: 'start' })
+        return
+      }
+
+      const startY = window.scrollY
+      const targetY =
+        el.getBoundingClientRect().top + window.scrollY - SECTION_SCROLL_OFFSET_PX
+      const distance = targetY - startY
+      if (Math.abs(distance) < 2) return
+
+      const startedAt = performance.now()
+
+      function animateScroll(now: number) {
+        const progress = Math.min((now - startedAt) / SECTION_SCROLL_DURATION_MS, 1)
+        window.scrollTo(0, startY + distance * easeInOutCubic(progress))
+        if (progress < 1) requestAnimationFrame(animateScroll)
+      }
+
+      requestAnimationFrame(animateScroll)
     })
   })
 }

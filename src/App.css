@@ -296,9 +296,9 @@ button:disabled {
   padding: 22px 22px 18px;
   box-shadow: var(--shadow-soft);
   transition:
-    border-color 220ms ease,
-    box-shadow 220ms ease,
-    opacity 220ms ease;
+    border-color 380ms ease,
+    box-shadow 380ms ease,
+    opacity 380ms ease;
 }
 
 .ws-card.is-active {
@@ -306,7 +306,7 @@ button:disabled {
   box-shadow:
     0 0 0 1px var(--accent-ring),
     var(--shadow);
-  animation: section-enter 320ms ease both;
+  animation: section-enter 560ms ease both;
 }
 
 .ws-card.is-done:not(.is-active) {

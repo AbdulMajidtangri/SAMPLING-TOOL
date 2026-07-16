@@ -7,7 +7,6 @@ export type WizardStep =
   | 'design'
   | 'selection'
   | 'testing'
-  | 'evaluation'
   | 'workingPaper'
 
 export type StandardField =
@@ -193,26 +192,6 @@ export interface SelectionMeta {
   selectedIds: string[]
 }
 
-export interface TestingResult {
-  transactionId: string
-  tested: boolean
-  exception: boolean
-  exceptionValue: number
-  nature: string
-  notes: string
-}
-
-export interface EvaluationState {
-  exceptionCount: number
-  exceptionValue: number
-  natureSummary: string
-  widerIssue: 'yes' | 'no' | 'unclear'
-  furtherTesting: 'yes' | 'no'
-  conclusion: string
-  reviewerComments: string
-  untestedRemainderBasis: string
-}
-
 export interface SignOffState {
   preparedBy: string
   preparedDate: string
@@ -234,7 +213,11 @@ export interface FirmConfigSnapshot {
   smallPopHighRiskMinPct: number
   smallPopHighRiskMaxPct: number
   largePopCoverageByRisk: Record<RiskLevel, number>
-  riskScoreMatrix: Array<{ min: number; max: number; size: number }>
+  pathABaseSizes: Record<RiskScore, number>
+  pathAExpectedErrorAdjustments: Record<RiskScore, number>
+  pathAEvidenceAdjustments: Record<RiskScore, number>
+  pathAMinSize: number
+  pathAMaxSize: number
   valueCoverageTiers: Array<{
     tier: number
     maxInclusive: number | null

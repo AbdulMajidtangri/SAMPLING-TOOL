@@ -19,8 +19,8 @@ npm test
 
 The app has **only two main screens**:
 
-1. **Sampling Workspace** — all auditor work in one place (upload, mapping, data quality, audit info, sample size, selection, testing, evaluation)
-2. **Working Paper** — preview, print/export, and sign-off only (no recalculation or selection)
+1. **Sampling Workspace** — all auditor work in one place (upload, mapping, data quality, audit info, sample size, selection)
+2. **Working Paper** — preview, print/export, and sign-off of the selected items only (no testing conclusion or evaluation)
 
 Top navigation: `Sampling Workspace | Working Paper`
 
@@ -32,7 +32,7 @@ Top navigation: `Sampling Workspace | Working Paper`
 4. Audit information + Path A / Path B
 5. Sample size confirmation (hard stop before item selection)
 6. Selection method (exact confirmed size)
-7. Testing results & evaluation → Preview working paper
+7. Selected items review → Preview working paper
 
 ## Sample size — two paths
 

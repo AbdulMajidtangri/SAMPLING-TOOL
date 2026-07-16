@@ -78,7 +78,6 @@ const STEPS: WizardStep[] = [
   'design',
   'selection',
   'testing',
-  'evaluation',
 ]
 
 const WORKSPACE_SECTIONS: Array<{
@@ -100,7 +99,7 @@ function sectionDomId(step: WizardStep): string {
   const mapped =
     step === 'worksheet'
       ? 'mapping'
-      : step === 'evaluation' || step === 'workingPaper'
+      : step === 'workingPaper'
         ? 'testing'
         : step
   return `section-${mapped}`
@@ -1008,7 +1007,7 @@ export default function App() {
   const activeWorkspaceStep: WizardStep =
     step === 'worksheet'
       ? 'mapping'
-      : step === 'evaluation' || step === 'workingPaper'
+      : step === 'workingPaper'
         ? 'testing'
         : step
 
@@ -1016,7 +1015,7 @@ export default function App() {
     const mapped =
       id === 'worksheet'
         ? 'mapping'
-        : id === 'evaluation' || id === 'workingPaper'
+        : id === 'workingPaper'
           ? 'testing'
           : id
     return WORKSPACE_SECTIONS.findIndex((s) => s.id === mapped)
@@ -2037,10 +2036,12 @@ export default function App() {
 
                 {designInputs.sampleSizePath === 'pathA' && sizeSuggestion.pathADetail && (
                   <p className="hint">
-                    Path A scores: risk {designInputs.pathA.riskLevel}, expected error{' '}
-                    {designInputs.pathA.expectedError}, other evidence{' '}
-                    {designInputs.pathA.otherEvidence}. Matrix score{' '}
-                    {sizeSuggestion.pathADetail.score} → matrix size{' '}
+                    Path A: base {sizeSuggestion.pathADetail.baseSize} (risk{' '}
+                    {designInputs.pathA.riskLevel}), expected error{' '}
+                    {sizeSuggestion.pathADetail.expectedErrorAdjustment >= 0 ? '+' : ''}
+                    {sizeSuggestion.pathADetail.expectedErrorAdjustment}, other evidence{' '}
+                    {sizeSuggestion.pathADetail.evidenceAdjustment >= 0 ? '+' : ''}
+                    {sizeSuggestion.pathADetail.evidenceAdjustment} → sample size{' '}
                     {sizeSuggestion.pathADetail.matrixSize}.
                   </p>
                 )}
@@ -2320,7 +2321,7 @@ export default function App() {
                     <h2>Selected items</h2>
                     <p className="section-lead">
                       These are the transactions selected for testing. Open the working
-                      paper to print or export this list — no conclusion is required.
+                      paper to print or export this list.
                     </p>
                   </div>
                 </div>

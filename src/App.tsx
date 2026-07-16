@@ -1843,10 +1843,38 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <p className="hint">
-                    Path B uses confirmed coverage value, tier rules, floor, and minimum item
-                    count. The provisional pass only suggests sample size.
-                  </p>
+                  <div className="form-grid grid-1" style={{ marginTop: '10px' }}>
+                    <div>
+                      <label htmlFor="pathBCoveragePct" style={{ fontWeight: 600 }}>
+                        Coverage target (%) — required
+                      </label>
+                      <p className="hint" style={{ marginBottom: '6px' }}>
+                        Enter the percentage of total ledger value you need to cover. The tool will automatically select the highest-value transactions until this target is reached.
+                      </p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <input
+                          id="pathBCoveragePct"
+                          type="number"
+                          min={1}
+                          max={100}
+                          step={1}
+                          style={{ width: '110px' }}
+                          value={designInputs.pathBCoveragePercent}
+                          onChange={(e) => {
+                            invalidateFrom('planning')
+                            const v = Math.min(100, Math.max(1, Number(e.target.value) || 50))
+                            setDesignInputs((prev) => ({ ...prev, pathBCoveragePercent: v }))
+                          }}
+                        />
+                        <span style={{ fontWeight: 600, fontSize: '1.05rem' }}>%</span>
+                        {coverageTotal > 0 && (
+                          <span className="hint" style={{ margin: 0 }}>
+                            → target: <strong>{formatMoney((designInputs.pathBCoveragePercent / 100) * coverageTotal)}</strong> of {formatMoney(coverageTotal)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 )}
 
                 <div className="form-grid grid-2">
@@ -2216,13 +2244,13 @@ export default function App() {
                             <strong>{pathBReview.untestedCount}</strong>
                           </div>
                         </div>
-                        {pathBReview.coverageAchievedPercent >= 50 ? (
+                        {pathBReview.coverageAchievedPercent >= designInputs.pathBCoveragePercent ? (
                           <div className="banner success" style={{ backgroundColor: '#e6f4ea', color: '#137333', padding: '10px', borderRadius: '4px', marginBottom: '15px', border: '1px solid #ceead6' }}>
-                            ✓ Confirmed: Selection meets the 50% minimum monetary coverage requirement (Achieved: {pathBReview.coverageAchievedPercent.toFixed(1)}%).
+                            ✓ Confirmed: Selection meets the {designInputs.pathBCoveragePercent}% monetary coverage target (Achieved: {pathBReview.coverageAchievedPercent.toFixed(1)}%).
                           </div>
                         ) : (
                           <div className="banner error" style={{ backgroundColor: '#fce8e6', color: '#c5221f', padding: '10px', borderRadius: '4px', marginBottom: '15px', border: '1px solid #fad2cf' }}>
-                            ✗ Warning: Selection does not meet the 50% minimum monetary coverage requirement (Achieved: {pathBReview.coverageAchievedPercent.toFixed(1)}%).
+                            ✗ Warning: Selection does not meet the {designInputs.pathBCoveragePercent}% monetary coverage target (Achieved: {pathBReview.coverageAchievedPercent.toFixed(1)}%).
                           </div>
                         )}
                       </>

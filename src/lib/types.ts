@@ -214,6 +214,7 @@ export interface SignOffState {
   preparedDate: string
   reviewedBy: string
   reviewedDate: string
+  reviewExtent: string
   reviewStatus: ReviewStatus
   locked: boolean
   lockDate: string

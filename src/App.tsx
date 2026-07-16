@@ -38,6 +38,7 @@ import {
 } from './lib/firmConfig'
 import { recommendMethod } from './lib/methodRecommend'
 import { buildPopulationSummary } from './lib/populationSummary'
+import { hashExtractedData } from './lib/hash'
 import type {
   CoverageResolution,
   DesignInputs,
@@ -50,6 +51,7 @@ import type {
   RiskLevel,
   RiskScore,
   SampleDesignState,
+  SelectionMeta,
   SelectionMethod,
   SignOffState,
   StandardField,
@@ -186,6 +188,8 @@ function defaultSignOff(): SignOffState {
     preparedDate: '',
     reviewedBy: '',
     reviewedDate: '',
+    reviewExtent:
+      'Reviewed the sample selection schedule, population source, and identifying characteristics of selected items.',
     reviewStatus: 'draft',
     locked: false,
     lockDate: '',
@@ -257,6 +261,7 @@ export default function App() {
   const [haphazardBiasConfirmed, setHaphazardBiasConfirmed] = useState(false)
 
   const [selected, setSelected] = useState<LedgerTransaction[]>([])
+  const [selectionMeta, setSelectionMeta] = useState<SelectionMeta | null>(null)
   const [pathBReview, setPathBReview] = useState<PathBReview | null>(null)
   const [signOff, setSignOff] = useState<SignOffState>(defaultSignOff())
   const [configSnapshot, setConfigSnapshot] = useState<FirmConfigSnapshot | null>(null)
@@ -271,6 +276,7 @@ export default function App() {
   }, [sheet, headerRow])
 
   const activePop = useMemo(() => activeTransactions(transactions), [transactions])
+  const dataHash = useMemo(() => hashExtractedData(transactions), [transactions])
 
   const liveSummary = useMemo(
     () => buildPopulationSummary(transactions),
@@ -393,6 +399,7 @@ export default function App() {
     }
     if (idx <= selectionIdx) {
       setSelected([])
+      setSelectionMeta(null)
       setPathBReview(null)
     }
     if (idx < selectionIdx) {
@@ -823,29 +830,33 @@ export default function App() {
       }
     }
 
-    let selectedItems: LedgerTransaction[]
+    let outcome: { selected: LedgerTransaction[]; meta: SelectionMeta }
     try {
       if (method === 'random') {
-        selectedItems = selectRandom(pop, size).selected
+        outcome = selectRandom(pop, size)
       } else if (method === 'systematic') {
-        selectedItems = selectSystematic(pop, size).selected
+        outcome = selectSystematic(pop, size)
       } else if (method === 'block') {
-        selectedItems = selectBlock(pop, size, blockStart, blockRationale).selected
+        outcome = selectBlock(pop, size, blockStart, blockRationale)
       } else {
-        selectedItems = selectHaphazard(pop, haphazardIds, haphazardBiasConfirmed).selected
+        outcome = selectHaphazard(pop, haphazardIds, haphazardBiasConfirmed)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Selection failed.')
       return
     }
 
-    if (selectedItems.length !== size) {
+    if (outcome.selected.length !== size) {
       setError('Selected item count must equal the confirmed sample size.')
       return
     }
 
     setError('')
-    setSelected(selectedItems)
+    setSelected(outcome.selected)
+    setSelectionMeta({
+      ...outcome.meta,
+      rationale: sampleDesign.methodOverrideReason || outcome.meta.rationale,
+    })
 
     let nextWarnings: string[] = []
     if (designInputs.sampleSizePath === 'pathB') {
@@ -853,7 +864,7 @@ export default function App() {
         sizeSuggestion.pathBDetail?.requiredCoverageValue ?? 0
       const review = pathBPostSelectionReview({
         population: pop,
-        selected: selectedItems,
+        selected: outcome.selected,
         requiredCoverageValue: requiredCoverage,
       })
       setPathBReview(review)
@@ -934,6 +945,7 @@ export default function App() {
     setHaphazardIds([])
     setHaphazardBiasConfirmed(false)
     setSelected([])
+    setSelectionMeta(null)
     setPathBReview(null)
     setSignOff(defaultSignOff())
     setConfigSnapshot(null)
@@ -2350,24 +2362,133 @@ export default function App() {
             </div>
           </div>
 
-          <article className="working-paper">
+          <article className="working-paper isa230-wp">
             <header className="wp-masthead">
-              <p className="wp-tool">Non-Statistical Audit Sampling Tool · v{TOOL_VERSION}</p>
-              <h1>Selected sample items</h1>
-              <div className="wp-header-grid">
-                <p><strong>Client</strong><span>{engagement.clientName || '—'}</span></p>
-                <p><strong>Audit area</strong><span>{engagement.auditArea || '—'}</span></p>
-                <p><strong>Period</strong><span>{engagement.period || '—'}</span></p>
-                <p><strong>WP reference</strong><span>{engagement.wpReference || '—'}</span></p>
-                <p><strong>File</strong><span>{ledger?.fileName || '—'}</span></p>
-                <p><strong>Worksheet</strong><span>{ledger?.sheets[sheetIndex]?.name || '—'}</span></p>
-                <p><strong>Prepared by</strong><span>{signOff.preparedBy || '—'}</span></p>
-                <p><strong>Date</strong><span>{signOff.preparedDate || todayIsoDate()}</span></p>
+              <div className="wp-std-line">
+                <span>Audit documentation</span>
+                <span>ISA 230</span>
               </div>
+              <h1>Sample Selection Working Paper</h1>
+              <p className="wp-subtitle">
+                Non-statistical audit sampling — selection schedule (ISA 230 / ISA 530)
+              </p>
+
+              <table className="wp-id-table">
+                <tbody>
+                  <tr>
+                    <th scope="row">Client</th>
+                    <td>{engagement.clientName || '—'}</td>
+                    <th scope="row">Period</th>
+                    <td>{engagement.period || '—'}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Subject / audit area</th>
+                    <td>{engagement.auditArea || '—'}</td>
+                    <th scope="row">WP reference</th>
+                    <td>{engagement.wpReference || '—'}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Prepared by</th>
+                    <td>{signOff.preparedBy || '—'}</td>
+                    <th scope="row">Date work completed</th>
+                    <td>{signOff.preparedDate || '—'}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Reviewed by</th>
+                    <td>{signOff.reviewedBy || '—'}</td>
+                    <th scope="row">Date of review</th>
+                    <td>{signOff.reviewedDate || '—'}</td>
+                  </tr>
+                </tbody>
+              </table>
             </header>
 
             <section>
-              <h2>Selected elements ({selected.length})</h2>
+              <h2>1. Purpose of this working paper</h2>
+              <p>
+                This working paper records the selection of items for audit testing so that
+                an experienced auditor, having no previous connection with the audit, can
+                understand the nature, timing and extent of the selection procedures
+                performed (ISA 230.8–.9).
+              </p>
+              <p><strong>Audit objective:</strong> {engagement.objective || '—'}</p>
+              <p><strong>Test type:</strong> {engagement.testType || '—'}</p>
+              <p><strong>Assertion(s):</strong> {engagement.assertion || '—'}</p>
+              <p><strong>Sampling unit:</strong> {engagement.samplingUnit || '—'}</p>
+            </section>
+
+            <section>
+              <h2>2. Nature of the procedure performed</h2>
+              <p>
+                Non-statistical sample selection from the client ledger population for the
+                subject area above. Selection performed using the tool’s confirmed sample
+                design for this engagement.
+              </p>
+              <p>
+                <strong>Selection method:</strong>{' '}
+                {methodLabel(sampleDesign.selectedMethod)}
+                {sampleDesign.methodOverrideReason
+                  ? ` (override rationale: ${sampleDesign.methodOverrideReason})`
+                  : ''}
+              </p>
+              {selectionMeta && (
+                <p className="wp-meta-line">
+                  Selection recorded {selectionMeta.timestamp}; tool v
+                  {selectionMeta.toolVersion}
+                  {selectionMeta.seed ? `; seed ${selectionMeta.seed}` : ''}
+                  {selectionMeta.rngAlgorithm
+                    ? `; RNG ${selectionMeta.rngAlgorithm}`
+                    : ''}
+                  {selectionMeta.interval != null
+                    ? `; interval ${selectionMeta.interval}`
+                    : ''}
+                  {selectionMeta.randomStart != null
+                    ? `; random start ${selectionMeta.randomStart}`
+                    : ''}
+                  .
+                </p>
+              )}
+            </section>
+
+            <section>
+              <h2>3. Source of information (population)</h2>
+              <p><strong>File:</strong> {ledger?.fileName || '—'}</p>
+              <p><strong>File hash:</strong> {ledger?.fileHash || '—'}</p>
+              <p><strong>Extracted data hash:</strong> {dataHash || '—'}</p>
+              <p>
+                <strong>Worksheet:</strong> {ledger?.sheets[sheetIndex]?.name || '—'} ·
+                header row {headerRow + 1} · data rows {dataStart + 1}–{dataEnd + 1}
+              </p>
+              <p>
+                <strong>Population (active items):</strong> {activePop.length} ·{' '}
+                <strong>Coverage value:</strong> {formatMoney(coverageTotal)}
+              </p>
+            </section>
+
+            <section>
+              <h2>4. Extent of selection</h2>
+              <p>
+                <strong>Items selected:</strong> {selected.length} of {activePop.length}{' '}
+                population items (confirmed sample size {sampleDesign.confirmedSize}).
+              </p>
+              <p>
+                <strong>Size basis:</strong>{' '}
+                {designInputs.sampleSizePath === 'pathA'
+                  ? `Path A risk score model — ${sampleDesign.sizeRuleLabel || sizeSuggestion.ruleLabel || 'firm matrix'}`
+                  : `Path B value coverage — ${sampleDesign.sizeRuleLabel || sizeSuggestion.ruleLabel || 'coverage tier guidance'}`}
+              </p>
+              {sampleDesign.sizeRationale ? (
+                <p><strong>Auditor note on extent:</strong> {sampleDesign.sizeRationale}</p>
+              ) : null}
+            </section>
+
+            <section>
+              <h2>5. Identifying characteristics of items selected (ISA 230.9(a))</h2>
+              <p>
+                The following items were selected for testing. Identifying characteristics
+                (date, voucher / document reference, description and amounts) are recorded
+                so each item can be traced and re-performed.
+              </p>
               <div className="preview-table-wrap">
                 <table>
                   <thead>
@@ -2400,13 +2521,18 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+              <p className="wp-note">
+                Results of detailed testing on these items, exceptions (if any), and the
+                auditor’s conclusion on the subject matter are documented on the related
+                testing working paper — not on this selection schedule.
+              </p>
             </section>
 
-            <section className="no-print-inputs">
-              <h2>Sign-off</h2>
-              <div className="form-grid grid-3">
+            <section>
+              <h2>6. Preparation and review (ISA 230.9(b)–(c))</h2>
+              <div className="form-grid grid-2 no-print-inputs">
                 <div>
-                  <label htmlFor="preparedBy">Prepared by</label>
+                  <label htmlFor="preparedBy">Prepared by (who performed the work)</label>
                   <input
                     id="preparedBy"
                     value={signOff.preparedBy}
@@ -2423,7 +2549,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="preparedDate">Prepared date</label>
+                  <label htmlFor="preparedDate">Date work completed</label>
                   <input
                     id="preparedDate"
                     type="date"
@@ -2455,7 +2581,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="reviewedDate">Reviewed date</label>
+                  <label htmlFor="reviewedDate">Date of review</label>
                   <input
                     id="reviewedDate"
                     type="date"
@@ -2467,11 +2593,31 @@ export default function App() {
                   />
                 </div>
               </div>
-              <p>
-                <strong>Lock status:</strong>{' '}
-                {signOff.locked ? `Locked on ${signOff.lockDate || '—'}` : 'Not locked'}
+              <label htmlFor="reviewExtent">Extent of review</label>
+              <textarea
+                id="reviewExtent"
+                rows={2}
+                value={signOff.reviewExtent}
+                disabled={signOff.locked}
+                onChange={(e) =>
+                  setSignOff((prev) => ({ ...prev, reviewExtent: e.target.value }))
+                }
+              />
+              <p className="wp-assembly">
+                <strong>File assembly (ISA 230):</strong> assemble the final audit file on
+                a timely basis after the date of the auditor’s report
+                {signOff.fileAssemblyDeadline
+                  ? ` (target deadline recorded: ${signOff.fileAssemblyDeadline})`
+                  : ''}
+                . Lock status:{' '}
+                {signOff.locked ? `Locked on ${signOff.lockDate || '—'}` : 'Not locked'}.
               </p>
             </section>
+
+            <footer className="wp-footer">
+              Tool version {TOOL_VERSION}
+              {configSnapshot ? ` · Config captured ${configSnapshot.capturedAt}` : ''}
+            </footer>
           </article>
         </div>
       )}

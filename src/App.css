@@ -814,17 +814,30 @@ th {
 
 .working-paper {
   background: #fffefb;
-  border: 1px solid #d9d2c5;
-  border-radius: 4px;
-  padding: 36px 40px;
+  border: 1px solid #cfc7b8;
+  border-radius: 2px;
+  padding: 32px 36px 40px;
   box-shadow: var(--shadow);
-  font-size: 0.95rem;
+  font-size: 0.94rem;
+  color: #1a1a1a;
+}
+
+.wp-std-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5c6570;
+  font-weight: 700;
+  margin-bottom: 8px;
 }
 
 .wp-masthead {
   border-bottom: 2px solid #1f2a33;
   padding-bottom: 16px;
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
 
 .wp-tool {
@@ -836,21 +849,77 @@ th {
 }
 
 .working-paper h1 {
-  margin: 6px 0 14px;
+  margin: 4px 0 6px;
   font-family: var(--serif);
-  font-size: 1.9rem;
+  font-size: 1.65rem;
   letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+.wp-subtitle {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.wp-id-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin-top: 8px;
+}
+
+.wp-id-table th,
+.wp-id-table td {
+  border: 1px solid #d4cdc0;
+  padding: 8px 10px;
+  vertical-align: top;
+}
+
+.wp-id-table th {
+  width: 18%;
+  background: #f4f1ea;
+  font-weight: 650;
+  text-align: left;
+  color: #44505c;
+}
+
+.wp-id-table td {
+  width: 32%;
+  background: #fff;
 }
 
 .working-paper h2 {
   margin: 22px 0 8px;
-  font-size: 1.05rem;
+  font-size: 1rem;
   border-bottom: 1px solid #e4ddd0;
   padding-bottom: 4px;
+  font-weight: 700;
 }
 
 .working-paper p {
   margin: 6px 0;
+}
+
+.wp-meta-line,
+.wp-note,
+.wp-assembly,
+.wp-footer {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.wp-note {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid #0f5c63;
+  background: #f4fafb;
+}
+
+.wp-footer {
+  margin-top: 28px;
+  padding-top: 12px;
+  border-top: 1px solid #e4ddd0;
 }
 
 .wp-header-grid {

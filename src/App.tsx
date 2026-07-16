@@ -710,6 +710,7 @@ export default function App() {
       path: designInputs.sampleSizePath,
       pathA: designInputs.pathA,
       transactions: pop,
+      pathBCoveragePct: designInputs.pathBCoveragePercent,
     })
     
     const isPathB = designInputs.sampleSizePath === 'pathB'
@@ -853,7 +854,7 @@ export default function App() {
       } else if (method === 'haphazard') {
         outcome = selectHaphazard(pop, haphazardIds, haphazardBiasConfirmed)
       } else if (method === 'valueCoverage') {
-        const selected = runPathBSelection(pop)
+        const selected = runPathBSelection(pop, designInputs.pathBCoveragePercent)
         outcome = {
           selected,
           meta: {

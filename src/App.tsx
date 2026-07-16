@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   activeTransactions,
   buildTransactions,
@@ -33,7 +33,6 @@ import {
   ASSERTION_OPTIONS,
   AUDIT_AREA_OPTIONS,
   DEFAULT_HIGH_VALUE_THRESHOLD,
-  FILE_ASSEMBLY_DEADLINE_DAYS,
   TEST_TYPE_OPTIONS,
   captureFirmConfigSnapshot,
 } from './lib/firmConfig'
@@ -95,6 +94,28 @@ const WORKSPACE_SECTIONS: Array<{
   { id: 'selection', title: '6. Pick sample', blurb: 'Choose the transactions' },
   { id: 'testing', title: '7. Selected items', blurb: 'Review list & open WP' },
 ]
+
+/** DOM id for smooth scroll — worksheet shares the mapping section anchor. */
+function sectionDomId(step: WizardStep): string {
+  const mapped =
+    step === 'worksheet'
+      ? 'mapping'
+      : step === 'evaluation' || step === 'workingPaper'
+        ? 'testing'
+        : step
+  return `section-${mapped}`
+}
+
+function scrollToStepSection(step: WizardStep) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      document.getElementById(sectionDomId(step))?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    })
+  })
+}
 
 const DEFAULT_SIZE_RATIONALE =
   'Accepted suggested population coverage per firm guidance.'
@@ -206,13 +227,6 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-function addDaysIso(dateIso: string, days: number): string {
-  const d = new Date(`${dateIso}T00:00:00`)
-  if (Number.isNaN(d.getTime())) return ''
-  d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
-}
-
 /** Dropdown/chip label: show real ledger column position + header text. */
 function formatColumnLabel(index: number, header: string): string {
   const name = header.trim() || `Column ${index + 1}`
@@ -268,6 +282,7 @@ export default function App() {
   const [pathBReview, setPathBReview] = useState<PathBReview | null>(null)
   const [signOff, setSignOff] = useState<SignOffState>(defaultSignOff())
   const [configSnapshot, setConfigSnapshot] = useState<FirmConfigSnapshot | null>(null)
+  const scrollOnStepRef = useRef(true)
 
   const sheet = ledger?.sheets[sheetIndex]
   const headers = useMemo(() => {
@@ -435,7 +450,7 @@ export default function App() {
       setLedger(parsed)
       setSheetIndex(0)
       prepareSheet(parsed, 0)
-      setStep('worksheet')
+      advanceToStep('worksheet')
     } catch {
       setError('Could not read this file. Please upload an Excel workbook (.xlsx / .xls).')
     } finally {
@@ -582,7 +597,7 @@ export default function App() {
     setPopulationSummary(buildPopulationSummary(result.transactions))
     setPopulationConfirmed(false)
     setExcludeDrafts({})
-    setStep('confirm')
+    advanceToStep('confirm')
   }
 
   function resolveRow(id: string, resolution: CoverageResolution) {
@@ -664,7 +679,7 @@ export default function App() {
     setPopulationSummary(summary)
     setPopulationConfirmed(true)
     setError('')
-    setStep('planning')
+    advanceToStep('planning')
   }
 
   function continueFromPlanning() {
@@ -727,7 +742,7 @@ export default function App() {
       sizeRationale: DEFAULT_SIZE_RATIONALE,
     })
     setError('')
-    setStep('design')
+    advanceToStep('design')
   }
 
   function updateDesignMethod(next: SelectionMethod) {
@@ -795,7 +810,7 @@ export default function App() {
     }))
 
     setError('')
-    setStep('selection')
+    advanceToStep('selection')
   }
 
   function toggleHaphazard(id: string) {
@@ -873,13 +888,19 @@ export default function App() {
       return
     }
 
-    if (outcome.selected.length !== size) {
+    if (method !== 'valueCoverage' && outcome.selected.length !== size) {
       setError('Selected item count must equal the confirmed sample size.')
       return
     }
 
     setError('')
     setSelected(outcome.selected)
+    if (method === 'valueCoverage') {
+      setSampleDesign((prev) => ({
+        ...prev,
+        confirmedSize: outcome.selected.length,
+      }))
+    }
     setSelectionMeta({
       ...outcome.meta,
       rationale: sampleDesign.methodOverrideReason || outcome.meta.rationale,
@@ -902,7 +923,7 @@ export default function App() {
       setPathBReview(null)
     }
     setWarnings(nextWarnings)
-    setStep('testing')
+    advanceToStep('testing')
   }
 
   function finishTesting() {
@@ -920,31 +941,6 @@ export default function App() {
     }))
     setStep('testing')
     setScreen('workingPaper')
-  }
-
-  function lockWorkingPaper() {
-    if (!signOff.reviewedBy.trim()) {
-      setError('Reviewed by is required before locking the working paper.')
-      return
-    }
-    if (signOff.locked && signOff.amendmentNote.trim() && !signOff.amendmentReviewerApproved) {
-      setError(
-        'Amendment note changed while locked — amendment reviewer approval is required.',
-      )
-      return
-    }
-    const lockDate = todayIsoDate()
-    setSignOff((prev) => ({
-      ...prev,
-      locked: true,
-      lockDate,
-      reviewStatus: 'locked',
-      reviewedDate: prev.reviewedDate || lockDate,
-      fileAssemblyDeadline:
-        prev.fileAssemblyDeadline ||
-        addDaysIso(lockDate, FILE_ASSEMBLY_DEADLINE_DAYS),
-    }))
-    setError('')
   }
 
   function resetAll() {
@@ -1049,14 +1045,27 @@ export default function App() {
 
   const canOpenWorkingPaper = selected.length > 0
 
+  function advanceToStep(next: WizardStep) {
+    scrollOnStepRef.current = true
+    setScreen('samplingWorkspace')
+    setStep(next)
+  }
+
+  useEffect(() => {
+    if (screen !== 'samplingWorkspace' || !scrollOnStepRef.current) return
+    scrollOnStepRef.current = false
+    scrollToStepSection(step)
+  }, [step, screen])
+
   function goToSection(id: WizardStep) {
     if (!sectionUnlocked(id) && id !== 'upload') return
-    setScreen('samplingWorkspace')
-    if (id === 'mapping' && ledger) setStep(transactions.length ? 'mapping' : 'worksheet')
-    else setStep(id)
-    requestAnimationFrame(() => {
-      document.getElementById(`section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
+    const target =
+      id === 'mapping' && ledger
+        ? transactions.length
+          ? 'mapping'
+          : 'worksheet'
+        : id
+    advanceToStep(target)
   }
 
   function openWorkingPaperPreview() {
@@ -1227,10 +1236,7 @@ export default function App() {
                     <button
                       type="button"
                       className="primary"
-                      onClick={() => {
-                        setStep('mapping')
-                        goToSection('mapping')
-                      }}
+                      onClick={() => advanceToStep('mapping')}
                     >
                       Continue
                     </button>
@@ -2416,18 +2422,6 @@ export default function App() {
               <button type="button" className="ghost" onClick={resetAll}>
                 New engagement
               </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={lockWorkingPaper}
-                disabled={
-                  signOff.locked &&
-                  !!signOff.amendmentNote.trim() &&
-                  !signOff.amendmentReviewerApproved
-                }
-              >
-                {signOff.locked ? 'Confirm lock' : 'Lock working paper'}
-              </button>
             </div>
           </div>
 
@@ -2544,7 +2538,6 @@ export default function App() {
                   <input
                     id="preparedBy"
                     value={signOff.preparedBy}
-                    disabled={signOff.locked}
                     onChange={(e) =>
                       setSignOff((prev) => ({
                         ...prev,
@@ -2562,7 +2555,6 @@ export default function App() {
                     id="preparedDate"
                     type="date"
                     value={signOff.preparedDate}
-                    disabled={signOff.locked}
                     onChange={(e) =>
                       setSignOff((prev) => ({ ...prev, preparedDate: e.target.value }))
                     }
@@ -2573,7 +2565,6 @@ export default function App() {
                   <input
                     id="reviewedBy"
                     value={signOff.reviewedBy}
-                    disabled={signOff.locked}
                     onChange={(e) =>
                       setSignOff((prev) => ({
                         ...prev,
@@ -2594,7 +2585,6 @@ export default function App() {
                     id="reviewedDate"
                     type="date"
                     value={signOff.reviewedDate}
-                    disabled={signOff.locked}
                     onChange={(e) =>
                       setSignOff((prev) => ({ ...prev, reviewedDate: e.target.value }))
                     }
@@ -2606,19 +2596,13 @@ export default function App() {
                 id="reviewExtent"
                 rows={2}
                 value={signOff.reviewExtent}
-                disabled={signOff.locked}
                 onChange={(e) =>
                   setSignOff((prev) => ({ ...prev, reviewExtent: e.target.value }))
                 }
               />
               <p className="wp-assembly">
                 <strong>File assembly (ISA 230):</strong> assemble the final audit file on
-                a timely basis after the date of the auditor’s report
-                {signOff.fileAssemblyDeadline
-                  ? ` (target deadline recorded: ${signOff.fileAssemblyDeadline})`
-                  : ''}
-                . Lock status:{' '}
-                {signOff.locked ? `Locked on ${signOff.lockDate || '—'}` : 'Not locked'}.
+                a timely basis after the date of the auditor’s report.
               </p>
             </section>
 

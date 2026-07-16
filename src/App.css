@@ -251,7 +251,7 @@ button:disabled {
 
 .rail-item.is-active {
   background: var(--surface);
-  border-color: var(--line-strong);
+  border-color: var(--accent);
   box-shadow: var(--shadow-soft);
 }
 
@@ -282,6 +282,11 @@ button:disabled {
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+  scroll-behavior: smooth;
+}
+
+[id^='section-'] {
+  scroll-margin-top: 88px;
 }
 
 .ws-card {
@@ -290,16 +295,37 @@ button:disabled {
   border-radius: var(--radius);
   padding: 22px 22px 18px;
   box-shadow: var(--shadow-soft);
-  transition: border-color 180ms ease, box-shadow 180ms ease;
+  transition:
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    opacity 220ms ease;
 }
 
 .ws-card.is-active {
-  border-color: var(--line-strong);
-  box-shadow: var(--shadow);
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent-ring),
+    var(--shadow);
+  animation: section-enter 320ms ease both;
+}
+
+.ws-card.is-done:not(.is-active) {
+  opacity: 0.92;
 }
 
 .ws-card.is-locked {
-  opacity: 0.7;
+  opacity: 0.65;
+}
+
+@keyframes section-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .ws-card-head {

@@ -1,34 +1,39 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=Source+Serif+4:wght@500;600&display=swap');
 
 :root {
   color-scheme: light;
-  --bg: #eef1f4;
-  --bg-accent: #e4e9ef;
-  --ink: #15202b;
-  --muted: #5b6b7c;
-  --line: #d5dde6;
+  --bg: #f0f2f5;
+  --bg-subtle: #e8ebf0;
+  --ink: #1a2332;
+  --muted: #5c6778;
+  --line: #d8dde5;
+  --line-strong: #c4cad4;
+  --surface: #ffffff;
+  --surface-muted: #f7f8fa;
+  --surface-hover: #eef1f6;
   --card: #ffffff;
-  --rail: #f7f9fb;
-  --accent: #0f5c63;
-  --accent-soft: #e6f3f4;
+  --rail: #fafbfc;
+  --accent: #1e3a5f;
+  --accent-hover: #163049;
+  --accent-soft: #e8eef5;
+  --accent-ring: rgba(30, 58, 95, 0.14);
   --accent-ink: #ffffff;
-  --warn-bg: #fff7e8;
-  --warn-ink: #8a5a00;
-  --error-bg: #fff1f0;
-  --error-ink: #b42318;
-  --ok: #0f7a4c;
-  --shadow: 0 12px 28px rgba(21, 32, 43, 0.07);
-  --shadow-soft: 0 4px 14px rgba(21, 32, 43, 0.05);
-  --radius: 14px;
-  --font: 'IBM Plex Sans', 'Segoe UI', sans-serif;
-  --serif: 'IBM Plex Serif', Georgia, serif;
+  --warn-bg: #fef8ec;
+  --warn-ink: #7a5c14;
+  --error-bg: #fef2f2;
+  --error-ink: #9b1c1c;
+  --ok: #166534;
+  --shadow: 0 8px 24px rgba(26, 35, 50, 0.08);
+  --shadow-soft: 0 2px 8px rgba(26, 35, 50, 0.05);
+  --shadow-lg: 0 16px 40px rgba(26, 35, 50, 0.12);
+  --radius: 10px;
+  --radius-sm: 8px;
+  --font: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
+  --serif: 'Source Serif 4', Georgia, serif;
   font-family: var(--font);
   color: var(--ink);
-  background:
-    radial-gradient(1200px 500px at 10% -10%, #d9e8ea 0%, transparent 55%),
-    radial-gradient(900px 400px at 100% 0%, #dde4ef 0%, transparent 50%),
-    var(--bg);
-  line-height: 1.45;
+  background: var(--bg);
+  line-height: 1.5;
 }
 
 * {
@@ -77,9 +82,9 @@ button:disabled {
   align-items: center;
   gap: 16px;
   padding: 12px 20px;
-  background: rgba(247, 249, 251, 0.92);
-  backdrop-filter: blur(10px);
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
+  box-shadow: var(--shadow-soft);
 }
 
 .topbar-spacer {
@@ -96,10 +101,8 @@ button:disabled {
 .brand-mark {
   width: 34px;
   height: 34px;
-  border-radius: 10px;
-  background:
-    linear-gradient(145deg, #0f5c63 0%, #1a7a84 55%, #2a9aa4 100%);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
   flex: 0 0 auto;
 }
 
@@ -148,7 +151,7 @@ button:disabled {
 
 .status-dot.on {
   background: var(--ok);
-  box-shadow: 0 0 0 4px rgba(15, 122, 76, 0.12);
+  box-shadow: 0 0 0 3px rgba(22, 101, 52, 0.15);
 }
 
 .floating-banner {
@@ -187,13 +190,13 @@ button:disabled {
 .next-hint {
   margin: 0 0 14px;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 0.84rem;
-  font-weight: 550;
-  line-height: 1.35;
-  border: 1px solid #b9d5d8;
+  font-weight: 500;
+  line-height: 1.4;
+  border: 1px solid var(--line);
 }
 
 .rail-wp-btn {
@@ -247,8 +250,8 @@ button:disabled {
 }
 
 .rail-item.is-active {
-  background: #fff;
-  border-color: #b9d5d8;
+  background: var(--surface);
+  border-color: var(--line-strong);
   box-shadow: var(--shadow-soft);
 }
 
@@ -284,16 +287,15 @@ button:disabled {
 .ws-card {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: var(--radius);
   padding: 22px 22px 18px;
   box-shadow: var(--shadow-soft);
-  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
-  animation: rise-in 280ms ease both;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
 .ws-card.is-active {
-  border-color: #9fc5c9;
-  box-shadow: 0 0 0 1px rgba(15, 92, 99, 0.12), var(--shadow);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow);
 }
 
 .ws-card.is-locked {
@@ -333,10 +335,9 @@ button:disabled {
   align-items: flex-start;
   gap: 8px;
   padding: 18px;
-  border-radius: 14px;
-  background:
-    linear-gradient(180deg, #f4fafb 0%, #eef5f6 100%);
-  border: 1px dashed #b7d0d3;
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  border: 1px dashed var(--line-strong);
   margin-bottom: 14px;
 }
 
@@ -411,23 +412,18 @@ select,
 textarea {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 11px 12px;
-  background: #fff;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--surface);
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
-input[list] {
-  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
-    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-  background-position:
-    calc(100% - 16px) calc(50% - 3px),
-    calc(100% - 11px) calc(50% - 3px);
-  background-size:
-    5px 5px,
-    5px 5px;
-  background-repeat: no-repeat;
-  padding-right: 28px;
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
 textarea {
@@ -453,22 +449,22 @@ textarea {
   border: none;
   background: var(--accent);
   color: var(--accent-ink);
-  box-shadow: 0 8px 18px rgba(15, 92, 99, 0.22);
+  box-shadow: var(--shadow-soft);
 }
 
 .primary:hover:not(:disabled) {
-  filter: brightness(1.05);
+  background: var(--accent-hover);
 }
 
 .ghost {
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
 }
 
 .ghost:hover:not(:disabled) {
-  border-color: #b7c4d0;
-  background: #f8fafc;
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
 }
 
 .banner {
@@ -516,8 +512,8 @@ textarea {
   margin: 0;
   padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: #fafcfd;
+  border-radius: var(--radius);
+  background: var(--surface-muted);
   cursor: pointer;
   transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
 }
@@ -541,7 +537,7 @@ textarea {
 }
 
 .path-card.is-selected {
-  border-color: #9fc5c9;
+  border-color: var(--accent);
   background: var(--accent-soft);
   box-shadow: var(--shadow-soft);
 }
@@ -555,9 +551,9 @@ textarea {
 
 .stat-grid div {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 14px;
-  background: #f8fafc;
+  background: var(--surface-muted);
 }
 
 .stat-grid span {
@@ -604,8 +600,8 @@ td {
 }
 
 th {
-  background: #f3f6f9;
-  font-weight: 650;
+  background: var(--surface-muted);
+  font-weight: 600;
 }
 
 .map-row {
@@ -635,8 +631,8 @@ th {
 
 .confidence.high {
   color: var(--ok);
-  border-color: #abefc6;
-  background: #ecfdf3;
+  border-color: #bbf7d0;
+  background: #f0fdf4;
 }
 
 .confidence.medium {
@@ -818,13 +814,13 @@ th {
 }
 
 .working-paper {
-  background: #fffefb;
-  border: 1px solid #cfc7b8;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
   border-radius: 2px;
   padding: 32px 36px 40px;
   box-shadow: var(--shadow);
   font-size: 0.94rem;
-  color: #1a1a1a;
+  color: var(--ink);
 }
 
 .wp-std-line {
@@ -840,7 +836,7 @@ th {
 }
 
 .wp-masthead {
-  border-bottom: 2px solid #1f2a33;
+  border-bottom: 2px solid var(--ink);
   padding-bottom: 16px;
   margin-bottom: 20px;
 }
@@ -876,30 +872,36 @@ th {
 
 .wp-id-table th,
 .wp-id-table td {
-  border: 1px solid #d4cdc0;
+  border: 1px solid var(--line);
   padding: 8px 10px;
   vertical-align: top;
 }
 
 .wp-id-table th {
   width: 18%;
-  background: #f4f1ea;
-  font-weight: 650;
+  background: var(--surface-muted);
+  font-weight: 600;
   text-align: left;
-  color: #44505c;
+  color: var(--muted);
 }
 
 .wp-id-table td {
   width: 32%;
-  background: #fff;
+  background: var(--surface);
 }
 
 .working-paper h2 {
   margin: 22px 0 8px;
   font-size: 1rem;
-  border-bottom: 1px solid #e4ddd0;
+  border-bottom: 1px solid var(--line);
   padding-bottom: 4px;
   font-weight: 700;
+  color: var(--ink);
+}
+
+.wp-table {
+  border-radius: 0;
+  border-color: var(--line-strong);
 }
 
 .working-paper p {
@@ -917,8 +919,8 @@ th {
 .wp-note {
   margin-top: 12px;
   padding: 10px 12px;
-  border-left: 3px solid #0f5c63;
-  background: #f4fafb;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
 }
 
 .wp-footer {

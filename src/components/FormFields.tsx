@@ -1,8 +1,16 @@
-import { useEffect, useId, useState, type InputHTMLAttributes } from 'react'
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type InputHTMLAttributes,
+  type KeyboardEvent,
+} from 'react'
+import './FormFields.css'
 
-type SuggestFieldProps = {
+type ComboFieldProps = {
   id?: string
-  label?: string
   value: string
   options: readonly string[]
   onChange: (value: string) => void
@@ -10,38 +18,159 @@ type SuggestFieldProps = {
   disabled?: boolean
 }
 
-/** Text field with dropdown suggestions — user can pick or type freely. */
-export function SuggestField({
+/** Professional combobox: type freely or pick from a filtered list. */
+export function ComboField({
   id,
   value,
   options,
   onChange,
   placeholder,
   disabled,
-}: SuggestFieldProps) {
+}: ComboFieldProps) {
   const autoId = useId()
   const fieldId = id ?? autoId
-  const listId = `${fieldId}-suggestions`
+  const listboxId = `${fieldId}-listbox`
+  const rootRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const [open, setOpen] = useState(false)
+  const [activeIndex, setActiveIndex] = useState(-1)
+
+  const filtered = useMemo(() => {
+    const q = value.trim().toLowerCase()
+    if (!q) return [...options]
+    const matches = options.filter((opt) => opt.toLowerCase().includes(q))
+    if (value && !options.some((opt) => opt.toLowerCase() === q)) {
+      return matches
+    }
+    return matches
+  }, [options, value])
+
+  useEffect(() => {
+    if (!open) setActiveIndex(-1)
+  }, [open])
+
+  useEffect(() => {
+    function onDocPointer(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocPointer)
+    return () => document.removeEventListener('mousedown', onDocPointer)
+  }, [])
+
+  function selectOption(opt: string) {
+    onChange(opt)
+    setOpen(false)
+    inputRef.current?.focus()
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (disabled) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setOpen(true)
+      setActiveIndex((i) => Math.min(i + 1, filtered.length - 1))
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setOpen(true)
+      setActiveIndex((i) => Math.max(i - 1, 0))
+      return
+    }
+    if (e.key === 'Enter' && open && activeIndex >= 0 && filtered[activeIndex]) {
+      e.preventDefault()
+      selectOption(filtered[activeIndex])
+      return
+    }
+    if (e.key === 'Escape') {
+      setOpen(false)
+    }
+  }
 
   return (
-    <>
-      <input
-        id={fieldId}
-        list={listId}
-        value={value}
-        disabled={disabled}
-        placeholder={placeholder ?? 'Select or type…'}
-        autoComplete="off"
-        onChange={(e) => onChange(e.target.value)}
-      />
-      <datalist id={listId}>
-        {options.map((opt) => (
-          <option key={opt} value={opt} />
-        ))}
-      </datalist>
-    </>
+    <div
+      ref={rootRef}
+      className={`combo-field ${open ? 'is-open' : ''} ${disabled ? 'is-disabled' : ''}`}
+    >
+      <div className="combo-control">
+        <input
+          ref={inputRef}
+          id={fieldId}
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listboxId}
+          aria-autocomplete="list"
+          value={value}
+          disabled={disabled}
+          placeholder={placeholder ?? 'Select or type…'}
+          autoComplete="off"
+          className="combo-input"
+          onChange={(e) => {
+            onChange(e.target.value)
+            setOpen(true)
+            setActiveIndex(0)
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={onKeyDown}
+        />
+        <button
+          type="button"
+          className="combo-toggle"
+          tabIndex={-1}
+          disabled={disabled}
+          aria-label="Show options"
+          onClick={() => {
+            setOpen((v) => !v)
+            inputRef.current?.focus()
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path
+              d="M3.5 5.25L7 8.75L10.5 5.25"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
+
+      {open && !disabled && (
+        <ul id={listboxId} role="listbox" className="combo-menu">
+          {filtered.length === 0 ? (
+            <li className="combo-empty">No matching options — your typed value will be used.</li>
+          ) : (
+            filtered.map((opt, index) => (
+              <li
+                key={opt}
+                role="option"
+                aria-selected={value === opt}
+                className={[
+                  'combo-option',
+                  value === opt ? 'is-selected' : '',
+                  index === activeIndex ? 'is-active' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                onMouseEnter={() => setActiveIndex(index)}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => selectOption(opt)}
+              >
+                {opt}
+              </li>
+            ))
+          )}
+        </ul>
+      )}
+    </div>
   )
 }
+
+/** @deprecated Use ComboField — kept as alias for existing imports. */
+export const SuggestField = ComboField
 
 type NumberTextInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -51,15 +180,10 @@ type NumberTextInputProps = Omit<
   onValueChange: (value: number) => void
   min?: number
   max?: number
-  /** Allow clearing while typing; on blur empty becomes `emptyAs`. Default 0. */
   emptyAs?: number
   integer?: boolean
 }
 
-/**
- * Text input that only accepts digits (optional one decimal if integer=false).
- * Avoids React controlled `type="number"` quirks when clearing / editing.
- */
 export function NumberTextInput({
   value,
   onValueChange,
@@ -68,6 +192,7 @@ export function NumberTextInput({
   emptyAs = 0,
   integer = true,
   onBlur,
+  className,
   ...rest
 }: NumberTextInputProps) {
   const [text, setText] = useState(() => String(value))
@@ -106,6 +231,7 @@ export function NumberTextInput({
       type="text"
       inputMode={integer ? 'numeric' : 'decimal'}
       autoComplete="off"
+      className={['num-text-input', className].filter(Boolean).join(' ')}
       value={text}
       onChange={(e) => {
         const raw = e.target.value
@@ -115,7 +241,6 @@ export function NumberTextInput({
         if (raw === '' || raw === '.') return
         const parsed = integer ? Number.parseInt(raw, 10) : Number.parseFloat(raw)
         if (!Number.isFinite(parsed)) return
-        // Do not clamp while typing — only sync the numeric draft to parent.
         onValueChange(parsed)
       }}
       onBlur={(e) => {

@@ -68,7 +68,7 @@ import {
 } from './lib/types'
 import './App.css'
 import { type MainScreenId } from './lib/navigation'
-import { NumberTextInput, SuggestField } from './components/FormFields'
+import { NumberTextInput, ComboField } from './components/FormFields'
 
 const STEPS: WizardStep[] = [
   'upload',
@@ -264,7 +264,7 @@ export default function App() {
   const [haphazardBiasConfirmed, setHaphazardBiasConfirmed] = useState(false)
 
   const [selected, setSelected] = useState<LedgerTransaction[]>([])
-  const [selectionMeta, setSelectionMeta] = useState<SelectionMeta | null>(null)
+  const [, setSelectionMeta] = useState<SelectionMeta | null>(null)
   const [pathBReview, setPathBReview] = useState<PathBReview | null>(null)
   const [signOff, setSignOff] = useState<SignOffState>(defaultSignOff())
   const [configSnapshot, setConfigSnapshot] = useState<FirmConfigSnapshot | null>(null)
@@ -279,7 +279,6 @@ export default function App() {
   }, [sheet, headerRow])
 
   const activePop = useMemo(() => activeTransactions(transactions), [transactions])
-  const dataHash = useMemo(() => hashExtractedData(transactions), [transactions])
 
   const liveSummary = useMemo(
     () => buildPopulationSummary(transactions),
@@ -1645,7 +1644,7 @@ export default function App() {
                   </div>
                   <div>
                     <label htmlFor="auditArea">Audit area</label>
-                    <SuggestField
+                    <ComboField
                       id="auditArea"
                       value={engagement.auditArea}
                       options={AUDIT_AREA_OPTIONS}
@@ -1669,7 +1668,7 @@ export default function App() {
                   </div>
                   <div>
                     <label htmlFor="testType">Test type</label>
-                    <SuggestField
+                    <ComboField
                       id="testType"
                       value={engagement.testType}
                       options={TEST_TYPE_OPTIONS}
@@ -1681,7 +1680,7 @@ export default function App() {
                   </div>
                   <div>
                     <label htmlFor="assertion">Assertion</label>
-                    <SuggestField
+                    <ComboField
                       id="assertion"
                       value={engagement.assertion}
                       options={ASSERTION_OPTIONS}
@@ -2438,9 +2437,9 @@ export default function App() {
                 <span>Audit documentation</span>
                 <span>ISA 230</span>
               </div>
-              <h1>Sample Selection Working Paper</h1>
+              <h1>Audit Sample — Selected Items</h1>
               <p className="wp-subtitle">
-                Non-statistical audit sampling — selection schedule (ISA 230 / ISA 530)
+                Audit documentation per ISA 230
               </p>
 
               <table className="wp-id-table">
@@ -2474,102 +2473,36 @@ export default function App() {
             </header>
 
             <section>
-              <h2>1. Purpose of this working paper</h2>
+              <h2>1. Purpose</h2>
               <p>
-                This working paper records the selection of items for audit testing so that
-                an experienced auditor, having no previous connection with the audit, can
-                understand the nature, timing and extent of the selection procedures
-                performed (ISA 230.8–.9).
+                This working paper documents the items selected from the population for
+                audit testing, with identifying characteristics sufficient for traceability
+                (ISA 230.9(a)).
               </p>
               <p><strong>Audit objective:</strong> {engagement.objective || '—'}</p>
-              <p><strong>Test type:</strong> {engagement.testType || '—'}</p>
-              <p><strong>Assertion(s):</strong> {engagement.assertion || '—'}</p>
+              <p><strong>Audit area:</strong> {engagement.auditArea || '—'}</p>
               <p><strong>Sampling unit:</strong> {engagement.samplingUnit || '—'}</p>
             </section>
 
             <section>
-              <h2>2. Nature of the procedure performed</h2>
-              <p>
-                Non-statistical sample selection from the client ledger population for the
-                subject area above. Selection performed using the tool’s confirmed sample
-                design for this engagement.
-              </p>
-              <p>
-                <strong>Selection method:</strong>{' '}
-                {methodLabel(sampleDesign.selectedMethod)}
-                {sampleDesign.methodOverrideReason
-                  ? ` (override rationale: ${sampleDesign.methodOverrideReason})`
-                  : ''}
-              </p>
-              {selectionMeta && (
-                <p className="wp-meta-line">
-                  Selection recorded {selectionMeta.timestamp}; tool v
-                  {selectionMeta.toolVersion}
-                  {selectionMeta.seed ? `; seed ${selectionMeta.seed}` : ''}
-                  {selectionMeta.rngAlgorithm
-                    ? `; RNG ${selectionMeta.rngAlgorithm}`
-                    : ''}
-                  {selectionMeta.interval != null
-                    ? `; interval ${selectionMeta.interval}`
-                    : ''}
-                  {selectionMeta.randomStart != null
-                    ? `; random start ${selectionMeta.randomStart}`
-                    : ''}
-                  .
-                </p>
-              )}
-            </section>
-
-            <section>
-              <h2>3. Source of information (population)</h2>
+              <h2>2. Population source</h2>
               <p><strong>File:</strong> {ledger?.fileName || '—'}</p>
-              <p><strong>File hash:</strong> {ledger?.fileHash || '—'}</p>
-              <p><strong>Extracted data hash:</strong> {dataHash || '—'}</p>
               <p>
                 <strong>Worksheet:</strong> {ledger?.sheets[sheetIndex]?.name || '—'} ·
-                header row {headerRow + 1} · data rows {dataStart + 1}–{dataEnd + 1}
+                rows {dataStart + 1}–{dataEnd + 1}
               </p>
               <p>
-                <strong>Population (active items):</strong> {activePop.length} ·{' '}
-                <strong>Coverage value:</strong> {formatMoney(coverageTotal)}
+                <strong>Population (active items):</strong> {activePop.length}
               </p>
             </section>
 
             <section>
-              <h2>4. Extent of selection</h2>
+              <h2>3. Selected sample ({selected.length} items)</h2>
               <p>
-                <strong>Items selected:</strong> {selected.length} of {activePop.length}{' '}
-                population items (confirmed sample size {sampleDesign.confirmedSize}).
+                The following {selected.length} item{selected.length === 1 ? '' : 's'}{' '}
+                {selected.length === 1 ? 'was' : 'were'} selected for testing.
               </p>
-              <p>
-                <strong>Size basis:</strong>{' '}
-                {designInputs.sampleSizePath === 'pathA'
-                  ? `Path A risk score model — ${sampleDesign.sizeRuleLabel || sizeSuggestion.ruleLabel || 'firm matrix'}`
-                  : `Path B value coverage — ${sampleDesign.sizeRuleLabel || sizeSuggestion.ruleLabel || 'coverage tier guidance'}`}
-              </p>
-              {sampleDesign.sizeRationale ? (
-                <p><strong>Auditor note on extent:</strong> {sampleDesign.sizeRationale}</p>
-              ) : null}
-              {designInputs.sampleSizePath === 'pathB' && (
-                <div style={{ marginTop: '12px', padding: '12px', border: '1px solid #ceead6', borderRadius: '6px', backgroundColor: '#e6f4ea', color: '#137333' }}>
-                  <p style={{ margin: '0 0 6px 0' }}><strong>Path B Value-Based Coverage Metrics:</strong></p>
-                  <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                    <li><strong>Total Coverage Amount:</strong> {formatMoney(selectedCoverage)}</li>
-                    <li><strong>Coverage Percentage:</strong> {coverageTotal > 0 ? ((selectedCoverage / coverageTotal) * 100).toFixed(1) : '0.0'}%</li>
-                    <li><strong>Confirmation:</strong> {coverageTotal > 0 && ((selectedCoverage / coverageTotal) * 100) >= 50 ? '✓ Confirmed: meets the 50% minimum monetary coverage requirement.' : '✗ Warning: does not meet the 50% minimum monetary coverage requirement.'}</li>
-                  </ul>
-                </div>
-              )}
-            </section>
-
-            <section>
-              <h2>5. Identifying characteristics of items selected (ISA 230.9(a))</h2>
-              <p>
-                The following items were selected for testing. Identifying characteristics
-                (date, voucher / document reference, description and amounts) are recorded
-                so each item can be traced and re-performed.
-              </p>
-              <div className="preview-table-wrap">
+              <div className="preview-table-wrap wp-table">
                 <table>
                   <thead>
                     <tr>
@@ -2580,12 +2513,11 @@ export default function App() {
                       <th>Debit</th>
                       <th>Credit</th>
                       <th>Coverage amount</th>
-                      {designInputs.sampleSizePath === 'pathB' && <th>Risk Level</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {selected.length === 0 ? (
-                      <tr><td colSpan={designInputs.sampleSizePath === 'pathB' ? 8 : 7}>None selected.</td></tr>
+                      <tr><td colSpan={7}>None selected.</td></tr>
                     ) : (
                       selected.map((t, index) => (
                         <tr key={`wp-sel-${t.id}`}>
@@ -2596,22 +2528,16 @@ export default function App() {
                           <td>{formatMoney(t.debit)}</td>
                           <td>{formatMoney(t.credit)}</td>
                           <td>{formatMoney(t.coverageAmount)}</td>
-                          {designInputs.sampleSizePath === 'pathB' && <td>{t.riskLevel || '—'}</td>}
                         </tr>
                       ))
                     )}
                   </tbody>
                 </table>
               </div>
-              <p className="wp-note">
-                Results of detailed testing on these items, exceptions (if any), and the
-                auditor’s conclusion on the subject matter are documented on the related
-                testing working paper — not on this selection schedule.
-              </p>
             </section>
 
             <section>
-              <h2>6. Preparation and review (ISA 230.9(b)–(c))</h2>
+              <h2>4. Preparation and review (ISA 230.9(b)–(c))</h2>
               <div className="form-grid grid-2 no-print-inputs">
                 <div>
                   <label htmlFor="preparedBy">Prepared by (who performed the work)</label>

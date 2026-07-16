@@ -30,10 +30,8 @@ import {
   runPathBSelection,
 } from './lib/selection'
 import {
-  ASSERTION_OPTIONS,
   AUDIT_AREA_OPTIONS,
   DEFAULT_HIGH_VALUE_THRESHOLD,
-  TEST_TYPE_OPTIONS,
   captureFirmConfigSnapshot,
 } from './lib/firmConfig'
 import { recommendMethod } from './lib/methodRecommend'
@@ -78,7 +76,6 @@ const STEPS: WizardStep[] = [
   'design',
   'selection',
   'testing',
-  'evaluation',
 ]
 
 const WORKSPACE_SECTIONS: Array<{
@@ -100,7 +97,7 @@ function sectionDomId(step: WizardStep): string {
   const mapped =
     step === 'worksheet'
       ? 'mapping'
-      : step === 'evaluation' || step === 'workingPaper'
+      : step === 'workingPaper'
         ? 'testing'
         : step
   return `section-${mapped}`
@@ -192,8 +189,6 @@ function defaultEngagement(): EngagementMeta {
     clientName: '',
     auditArea: 'Expenses',
     period: '',
-    testType: 'Tests of details — vouching',
-    assertion: ASSERTION_OPTIONS[0] ?? 'Existence / Occurrence',
     objective: '',
     samplingUnit: DEFAULT_SAMPLING_UNIT,
     errorDefinition: '',
@@ -475,7 +470,10 @@ export default function App() {
         setError('No worksheets found in this file.')
         return
       }
+      // Replacing the ledger restarts the engagement: every section reloads fresh.
       invalidateFrom('upload')
+      setEngagement(defaultEngagement())
+      setDesignInputs(defaultDesignInputs())
       setLedger(parsed)
       setSheetIndex(0)
       prepareSheet(parsed, 0)
@@ -713,12 +711,8 @@ export default function App() {
 
   function continueFromPlanning() {
     const required: Array<[string, string]> = [
-      [engagement.wpReference, 'WP reference'],
       [engagement.clientName, 'Client name'],
       [engagement.auditArea, 'Audit area'],
-      [engagement.period, 'Period'],
-      [engagement.testType, 'Test type'],
-      [engagement.assertion, 'Assertion'],
       [engagement.objective, 'Objective'],
       [engagement.samplingUnit, 'Sampling unit'],
       [engagement.errorDefinition, 'Error definition'],
@@ -1008,7 +1002,7 @@ export default function App() {
   const activeWorkspaceStep: WizardStep =
     step === 'worksheet'
       ? 'mapping'
-      : step === 'evaluation' || step === 'workingPaper'
+      : step === 'workingPaper'
         ? 'testing'
         : step
 
@@ -1016,7 +1010,7 @@ export default function App() {
     const mapped =
       id === 'worksheet'
         ? 'mapping'
-        : id === 'evaluation' || id === 'workingPaper'
+        : id === 'workingPaper'
           ? 'testing'
           : id
     return WORKSPACE_SECTIONS.findIndex((s) => s.id === mapped)
@@ -1654,18 +1648,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="form-grid grid-3">
-                  <div>
-                    <label htmlFor="wpRef">WP reference</label>
-                    <input
-                      id="wpRef"
-                      value={engagement.wpReference}
-                      onChange={(e) => {
-                        invalidateFrom('planning')
-                        setEngagement((prev) => ({ ...prev, wpReference: e.target.value }))
-                      }}
-                    />
-                  </div>
+                <div className="form-grid grid-2">
                   <div>
                     <label htmlFor="clientName">Client name</label>
                     <input
@@ -1686,42 +1669,6 @@ export default function App() {
                       onChange={(next) => {
                         invalidateFrom('planning')
                         setEngagement((prev) => ({ ...prev, auditArea: next }))
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="period">Period</label>
-                    <input
-                      id="period"
-                      value={engagement.period}
-                      onChange={(e) => {
-                        invalidateFrom('planning')
-                        setEngagement((prev) => ({ ...prev, period: e.target.value }))
-                      }}
-                      placeholder="e.g. Year ended 30 June 2026"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="testType">Test type</label>
-                    <ComboField
-                      id="testType"
-                      value={engagement.testType}
-                      options={TEST_TYPE_OPTIONS}
-                      onChange={(next) => {
-                        invalidateFrom('planning')
-                        setEngagement((prev) => ({ ...prev, testType: next }))
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="assertion">Assertion</label>
-                    <ComboField
-                      id="assertion"
-                      value={engagement.assertion}
-                      options={ASSERTION_OPTIONS}
-                      onChange={(next) => {
-                        invalidateFrom('planning')
-                        setEngagement((prev) => ({ ...prev, assertion: next }))
                       }}
                     />
                   </div>
@@ -2037,10 +1984,12 @@ export default function App() {
 
                 {designInputs.sampleSizePath === 'pathA' && sizeSuggestion.pathADetail && (
                   <p className="hint">
-                    Path A scores: risk {designInputs.pathA.riskLevel}, expected error{' '}
-                    {designInputs.pathA.expectedError}, other evidence{' '}
-                    {designInputs.pathA.otherEvidence}. Matrix score{' '}
-                    {sizeSuggestion.pathADetail.score} → matrix size{' '}
+                    Path A: base {sizeSuggestion.pathADetail.baseSize} (risk{' '}
+                    {designInputs.pathA.riskLevel}), expected error{' '}
+                    {sizeSuggestion.pathADetail.expectedErrorAdjustment >= 0 ? '+' : ''}
+                    {sizeSuggestion.pathADetail.expectedErrorAdjustment}, other evidence{' '}
+                    {sizeSuggestion.pathADetail.evidenceAdjustment >= 0 ? '+' : ''}
+                    {sizeSuggestion.pathADetail.evidenceAdjustment} → sample size{' '}
                     {sizeSuggestion.pathADetail.matrixSize}.
                   </p>
                 )}
@@ -2320,7 +2269,7 @@ export default function App() {
                     <h2>Selected items</h2>
                     <p className="section-lead">
                       These are the transactions selected for testing. Open the working
-                      paper to print or export this list — no conclusion is required.
+                      paper to print or export this list.
                     </p>
                   </div>
                 </div>
@@ -2471,13 +2420,35 @@ export default function App() {
                     <th scope="row">Client</th>
                     <td>{engagement.clientName || '—'}</td>
                     <th scope="row">Period</th>
-                    <td>{engagement.period || '—'}</td>
+                    <td>
+                      <input
+                        className="screen-only wp-inline-input"
+                        placeholder="e.g. Year ended 30 June 2026"
+                        aria-label="Period"
+                        value={engagement.period}
+                        onChange={(e) =>
+                          setEngagement((prev) => ({ ...prev, period: e.target.value }))
+                        }
+                      />
+                      <span className="print-only">{engagement.period || '—'}</span>
+                    </td>
                   </tr>
                   <tr>
                     <th scope="row">Subject / audit area</th>
                     <td>{engagement.auditArea || '—'}</td>
                     <th scope="row">WP reference</th>
-                    <td>{engagement.wpReference || '—'}</td>
+                    <td>
+                      <input
+                        className="screen-only wp-inline-input"
+                        placeholder="WP number"
+                        aria-label="WP reference"
+                        value={engagement.wpReference}
+                        onChange={(e) =>
+                          setEngagement((prev) => ({ ...prev, wpReference: e.target.value }))
+                        }
+                      />
+                      <span className="print-only">{engagement.wpReference || '—'}</span>
+                    </td>
                   </tr>
                   <tr>
                     <th scope="row">Prepared by</th>

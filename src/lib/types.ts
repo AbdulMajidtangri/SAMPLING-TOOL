@@ -122,7 +122,6 @@ export interface EngagementMeta {
   /** Entered on the working paper screen, not in the wizard. */
   period: string
   objective: string
-  samplingUnit: string
   errorDefinition: string
 }
 

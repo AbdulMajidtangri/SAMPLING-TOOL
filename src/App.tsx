@@ -145,7 +145,6 @@ function scrollToStepSection(step: WizardStep) {
 
 const DEFAULT_SIZE_RATIONALE =
   'Accepted suggested population coverage per firm guidance.'
-const DEFAULT_SAMPLING_UNIT = 'Individual expense voucher / document'
 const DEFAULT_HIGH_VALUE_BASIS =
   'Absolute coverage amount at or above the stated threshold (specific testing, not sampling).'
 const PATH_B_BELOW_REQUIRED_WARNING =
@@ -190,7 +189,6 @@ function defaultEngagement(): EngagementMeta {
     auditArea: 'Expenses',
     period: '',
     objective: '',
-    samplingUnit: DEFAULT_SAMPLING_UNIT,
     errorDefinition: '',
   }
 }
@@ -714,7 +712,6 @@ export default function App() {
       [engagement.clientName, 'Client name'],
       [engagement.auditArea, 'Audit area'],
       [engagement.objective, 'Objective'],
-      [engagement.samplingUnit, 'Sampling unit'],
       [engagement.errorDefinition, 'Error definition'],
     ]
     const missing = required.filter(([v]) => !v.trim()).map(([, label]) => label)
@@ -1685,16 +1682,6 @@ export default function App() {
                   }}
                 />
 
-                <label htmlFor="unit">Sampling unit</label>
-                <input
-                  id="unit"
-                  value={engagement.samplingUnit}
-                  onChange={(e) => {
-                    invalidateFrom('planning')
-                    setEngagement((prev) => ({ ...prev, samplingUnit: e.target.value }))
-                  }}
-                />
-
                 <label htmlFor="errorDef">Error definition</label>
                 <textarea
                   id="errorDef"
@@ -2452,15 +2439,74 @@ export default function App() {
                   </tr>
                   <tr>
                     <th scope="row">Prepared by</th>
-                    <td>{signOff.preparedBy || '—'}</td>
+                    <td>
+                      <input
+                        className="screen-only wp-inline-input"
+                        placeholder="Who performed the work"
+                        aria-label="Prepared by"
+                        value={signOff.preparedBy}
+                        onChange={(e) =>
+                          setSignOff((prev) => ({
+                            ...prev,
+                            preparedBy: e.target.value,
+                            reviewStatus:
+                              prev.reviewStatus === 'draft' ? 'prepared' : prev.reviewStatus,
+                            preparedDate: prev.preparedDate || todayIsoDate(),
+                          }))
+                        }
+                      />
+                      <span className="print-only">{signOff.preparedBy || '\u00A0'}</span>
+                    </td>
                     <th scope="row">Date work completed</th>
-                    <td>{signOff.preparedDate || '—'}</td>
+                    <td>
+                      <input
+                        className="screen-only wp-inline-input"
+                        type="date"
+                        aria-label="Date work completed"
+                        value={signOff.preparedDate}
+                        onChange={(e) =>
+                          setSignOff((prev) => ({ ...prev, preparedDate: e.target.value }))
+                        }
+                      />
+                      <span className="print-only">{signOff.preparedDate || '\u00A0'}</span>
+                    </td>
                   </tr>
                   <tr>
                     <th scope="row">Reviewed by</th>
-                    <td>{signOff.reviewedBy || '—'}</td>
+                    <td>
+                      <input
+                        className="screen-only wp-inline-input"
+                        placeholder="Reviewer name"
+                        aria-label="Reviewed by"
+                        value={signOff.reviewedBy}
+                        onChange={(e) =>
+                          setSignOff((prev) => ({
+                            ...prev,
+                            reviewedBy: e.target.value,
+                            reviewStatus: e.target.value.trim()
+                              ? 'reviewed'
+                              : prev.preparedBy
+                                ? 'prepared'
+                                : 'draft',
+                            reviewedDate: prev.reviewedDate || todayIsoDate(),
+                          }))
+                        }
+                      />
+                      <span className="print-only">{signOff.reviewedBy || '\u00A0'}</span>
+                    </td>
                     <th scope="row">Date of review</th>
-                    <td>{signOff.reviewedDate || '—'}</td>
+                    <td>
+                      <input
+                        className="screen-only wp-inline-input"
+                        type="date"
+                        aria-label="Date of review"
+                        value={signOff.reviewedDate}
+                        onChange={(e) =>
+                          setSignOff((prev) => ({ ...prev, reviewedDate: e.target.value }))
+                        }
+                      />
+                      <span className="print-only">{signOff.reviewedDate || '\u00A0'}</span>
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -2475,7 +2521,6 @@ export default function App() {
               </p>
               <p><strong>Audit objective:</strong> {engagement.objective || '—'}</p>
               <p><strong>Audit area:</strong> {engagement.auditArea || '—'}</p>
-              <p><strong>Sampling unit:</strong> {engagement.samplingUnit || '—'}</p>
             </section>
 
             <section>
@@ -2533,65 +2578,11 @@ export default function App() {
             <section>
               <h2>4. Preparation and review (ISA 230.9(b)–(c))</h2>
               <div className="screen-only">
-                <div className="form-grid grid-2">
-                  <div>
-                    <label htmlFor="preparedBy">Prepared by (who performed the work)</label>
-                    <input
-                      id="preparedBy"
-                      value={signOff.preparedBy}
-                      onChange={(e) =>
-                        setSignOff((prev) => ({
-                          ...prev,
-                          preparedBy: e.target.value,
-                          reviewStatus:
-                            prev.reviewStatus === 'draft' ? 'prepared' : prev.reviewStatus,
-                          preparedDate: prev.preparedDate || todayIsoDate(),
-                        }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="preparedDate">Date work completed</label>
-                    <input
-                      id="preparedDate"
-                      type="date"
-                      value={signOff.preparedDate}
-                      onChange={(e) =>
-                        setSignOff((prev) => ({ ...prev, preparedDate: e.target.value }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="reviewedBy">Reviewed by</label>
-                    <input
-                      id="reviewedBy"
-                      value={signOff.reviewedBy}
-                      onChange={(e) =>
-                        setSignOff((prev) => ({
-                          ...prev,
-                          reviewedBy: e.target.value,
-                          reviewStatus: e.target.value.trim()
-                            ? 'reviewed'
-                            : prev.preparedBy
-                              ? 'prepared'
-                              : 'draft',
-                          reviewedDate: prev.reviewedDate || todayIsoDate(),
-                        }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="reviewedDate">Date of review</label>
-                    <input
-                      id="reviewedDate"
-                      type="date"
-                      value={signOff.reviewedDate}
-                      onChange={(e) =>
-                        setSignOff((prev) => ({ ...prev, reviewedDate: e.target.value }))
-                      }
-                    />
-                  </div>
-                </div>
+                <p className="hint">
+                  Prepared by / Reviewed by and dates are entered at the top of this
+                  working paper. If left empty they print as blank boxes to be signed
+                  by hand.
+                </p>
                 <label htmlFor="reviewExtent">Extent of review</label>
                 <textarea
                   id="reviewExtent"

@@ -1,0 +1,44 @@
+name: Build macOS installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - building_sampling_tool
+    paths:
+      - '.github/workflows/build-mac.yml'
+      - 'package.json'
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer and main process
+        run: npm run build
+
+      - name: Package universal macOS installer (Intel + Apple Silicon)
+        run: npx electron-builder --mac --publish never
+        env:
+          # No Apple developer certificate — produce an unsigned build.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sampling-Tool-mac-universal
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error

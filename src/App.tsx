@@ -32,8 +32,11 @@ import {
 import {
   AUDIT_AREA_OPTIONS,
   DEFAULT_HIGH_VALUE_THRESHOLD,
+  FIRM_DESCRIPTOR,
+  FIRM_NAME,
   captureFirmConfigSnapshot,
 } from './lib/firmConfig'
+import { PeterCoMark } from './components/Logo'
 import { recommendMethod } from './lib/methodRecommend'
 import { buildPopulationSummary } from './lib/populationSummary'
 import { hashExtractedData } from './lib/hash'
@@ -1114,9 +1117,9 @@ export default function App() {
     <div className="app-shell">
       <header className="app-topbar">
         <div className="topbar-brand">
-          <div className="brand-mark" aria-hidden="true" />
+          <PeterCoMark className="brand-mark" />
           <div>
-            <p className="brand">Audit Sampling</p>
+            <p className="brand">{FIRM_NAME} · Audit Sampling</p>
             <p className="file-chip">{ledger?.fileName ?? 'No file yet'}</p>
           </div>
         </div>
@@ -2392,6 +2395,13 @@ export default function App() {
 
           <article className="working-paper isa230-wp">
             <header className="wp-masthead">
+              <div className="wp-firm">
+                <PeterCoMark className="wp-firm-mark" />
+                <div>
+                  <p className="wp-firm-name">{FIRM_NAME}</p>
+                  <p className="wp-firm-descriptor">{FIRM_DESCRIPTOR}</p>
+                </div>
+              </div>
               <div className="wp-std-line">
                 <span>Audit documentation</span>
                 <span>ISA 230</span>

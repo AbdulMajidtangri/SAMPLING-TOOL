@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="800" height="800">
+  <title>Peter &amp; Co. — Logo Symbol — Full Color</title>
+  <defs>
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#982598"/>
+      <stop offset="100%" stop-color="#A78BFA"/>
+    </linearGradient>
+  </defs>
+  <!-- Background (transparent) -->
+  <!-- Connection lines -->
+  <line x1="70" y1="80" x2="50" y2="60" stroke="#CBD5E1" stroke-width="4" stroke-linecap="round"/>
+  <line x1="130" y1="85" x2="170" y2="70" stroke="#CBD5E1" stroke-width="4" stroke-linecap="round"/>
+  <line x1="125" y1="125" x2="145" y2="150" stroke="#CBD5E1" stroke-width="4" stroke-linecap="round"/>
+  <line x1="70" y1="120" x2="45" y2="135" stroke="#CBD5E1" stroke-width="4" stroke-linecap="round"/>
+  <!-- Satellite nodes -->
+  <!-- Top-left -->
+  <circle cx="38" cy="45" r="20" fill="#0F172A"/>
+  <circle cx="38" cy="45" r="10" fill="url(#purpleGrad)"/>
+  <!-- Top-right -->
+  <circle cx="170" cy="60" r="25" fill="#0F172A"/>
+  <circle cx="170" cy="60" r="12.5" fill="url(#purpleGrad)"/>
+  <!-- Bottom-right -->
+  <circle cx="162" cy="162" r="17.5" fill="#0F172A"/>
+  <circle cx="162" cy="162" r="8.75" fill="url(#purpleGrad)"/>
+  <!-- Bottom-left -->
+  <circle cx="30" cy="150" r="15" fill="#0F172A"/>
+  <circle cx="30" cy="150" r="7.5" fill="url(#purpleGrad)"/>
+  <!-- Central node -->
+  <circle cx="100" cy="100" r="40" fill="#0F172A"/>
+  <circle cx="100" cy="100" r="30" fill="url(#purpleGrad)"/>
+  <text x="100" y="112" text-anchor="middle" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="35" font-weight="700">P</text>
+</svg>

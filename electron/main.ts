@@ -86,7 +86,8 @@ function createWindow() {
     height: 720,
     minWidth: 800,
     minHeight: 560,
-    title: 'Sampling Tool',
+    title: 'Peter & Co. — Sampling Tool',
+    icon: path.join(process.env.VITE_PUBLIC!, 'peterco-mark.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,

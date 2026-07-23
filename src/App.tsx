@@ -66,6 +66,7 @@ import {
 import './App.css'
 import { type MainScreenId } from './lib/navigation'
 import { NumberTextInput, ComboField } from './components/FormFields'
+import ProjectionModule from './components/ProjectionModule'
 
 const STEPS: WizardStep[] = [
   'upload',
@@ -481,6 +482,7 @@ const HaphazardPickList = memo(function HaphazardPickList({
 
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [appModule, setAppModule] = useState<'sampling' | 'projection'>('sampling')
   const [screen, setScreen] = useState<MainScreenId>('samplingWorkspace')
   const [step, setStep] = useState<WizardStep>('upload')
   const [busy, setBusy] = useState(false)
@@ -1342,18 +1344,40 @@ export default function App() {
           <div className="brand-mark" aria-hidden="true" />
           <div>
             <p className="brand">Audit Sampling</p>
-            <p className="file-chip">{ledger?.fileName ?? 'No file yet'}</p>
+            <p className="file-chip">
+              {appModule === 'projection'
+                ? 'ISA 530 Projection & Evaluation'
+                : ledger?.fileName ?? 'No file yet'}
+            </p>
           </div>
         </div>
+        <nav className="module-nav no-print" aria-label="Module">
+          <button
+            type="button"
+            className={appModule === 'sampling' ? 'is-active' : ''}
+            onClick={() => setAppModule('sampling')}
+          >
+            Sampling
+          </button>
+          <button
+            type="button"
+            className={appModule === 'projection' ? 'is-active' : ''}
+            onClick={() => setAppModule('projection')}
+          >
+            Projection
+          </button>
+        </nav>
         <div className="topbar-spacer" aria-hidden="true" />
         <div className="topbar-status">
           <span className={`status-dot ${ledger ? 'on' : ''}`} />
-          <span>{statusLabel}</span>
+          <span>{appModule === 'projection' ? 'ISA 530 module' : statusLabel}</span>
         </div>
       </header>
 
-      {error && <div className="banner error floating-banner">{error}</div>}
-      {warnings.length > 0 && screen === 'samplingWorkspace' && (
+      {appModule === 'sampling' && error && (
+        <div className="banner error floating-banner">{error}</div>
+      )}
+      {appModule === 'sampling' && warnings.length > 0 && screen === 'samplingWorkspace' && (
         <div className="banner warn floating-banner">
           {warnings.slice(0, 4).map((w) => (
             <div key={w}>{w}</div>
@@ -1361,7 +1385,12 @@ export default function App() {
         </div>
       )}
 
-      {screen === 'samplingWorkspace' ? (
+      {/* Projection module stays mounted so its inputs survive switching tabs. */}
+      <div style={{ display: appModule === 'projection' ? undefined : 'none' }}>
+        <ProjectionModule />
+      </div>
+
+      {appModule === 'sampling' && screen === 'samplingWorkspace' ? (
         <div className="workspace-layout">
           <aside className="progress-rail" aria-label="Workspace progress">
             <p className="rail-title">Your steps</p>
@@ -2531,7 +2560,7 @@ export default function App() {
             )}
           </aside>
         </div>
-      ) : (
+      ) : appModule === 'sampling' ? (
         <div className="wp-screen">
           <div className="wp-toolbar no-print">
             <button
@@ -2738,7 +2767,7 @@ export default function App() {
             </footer>
           </article>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

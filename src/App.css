@@ -78,12 +78,39 @@ button:disabled {
   top: 0;
   z-index: 40;
   display: grid;
-  grid-template-columns: minmax(200px, 1fr) minmax(120px, 2fr) auto;
+  grid-template-columns: minmax(200px, 1fr) auto minmax(60px, 2fr) auto;
   align-items: center;
   gap: 16px;
   padding: 12px 20px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
+  box-shadow: var(--shadow-soft);
+}
+
+/* Module switcher: Sampling | Projection */
+.module-nav {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.module-nav button {
+  border: none;
+  background: transparent;
+  padding: 7px 18px;
+  border-radius: 7px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.module-nav button.is-active {
+  background: var(--surface);
+  color: var(--ink, #16233a);
   box-shadow: var(--shadow-soft);
 }
 
@@ -930,6 +957,66 @@ th {
   border-style: solid;
   border-color: var(--accent, #4a6cf7);
   background: var(--surface);
+}
+
+/* ISA 530 Projection module */
+.proj-layout {
+  grid-template-columns: 1fr;
+}
+
+.proj-main {
+  max-width: 1120px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.proj-quality-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) 90px minmax(160px, 1.4fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.proj-quality-label {
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.proj-register input.proj-cell,
+.proj-register .num-text-input.proj-cell {
+  width: 100%;
+  min-width: 80px;
+}
+
+.proj-register td {
+  vertical-align: middle;
+}
+
+.proj-check {
+  margin: 0;
+  gap: 6px;
+}
+
+.proj-under {
+  color: #c5221f;
+}
+
+.proj-anomaly-row td {
+  background: var(--surface-muted);
+}
+
+.proj-anomaly-editor {
+  padding: 10px;
+}
+
+.proj-warning {
+  margin-bottom: 12px;
+}
+
+.proj-warning input {
+  width: 100%;
+  margin-top: 4px;
 }
 
 .working-paper h2 {

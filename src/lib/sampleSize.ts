@@ -9,8 +9,11 @@ import type {
 import { totalCoverageValue as coverageSum } from './coverage'
 import {
   DEFAULT_MIN_ITEM_COUNT,
-  RISK_SCORE_MATRIX,
-  VALUE_COVERAGE_TIERS,
+  PATH_A_BASE_SIZES,
+  PATH_A_EVIDENCE_ADJUSTMENTS,
+  PATH_A_EXPECTED_ERROR_ADJUSTMENTS,
+  PATH_A_MAX_SIZE,
+  PATH_A_MIN_SIZE,
 } from './firmConfig'
 
 export { DEFAULT_MIN_ITEM_COUNT }
@@ -42,8 +45,10 @@ export function scoreLabel(score: RiskScore, kind: keyof PathAInputs): string {
 }
 
 /**
- * Path A — risk matrix sample size only (§12).
- * Score = risk + expected error + other evidence → matrix size, capped at population.
+ * Path A — base-plus-adjustments matrix (§12).
+ * Base size from the risk level (15 / 30 / 50 / 70), adjusted for expected error
+ * (+0 / +5 / +10 / +15) and other audit evidence (-10 / +0 / +5 / +10), then
+ * clamped to the 15–70 band and capped at population.
  * Does not mix Path B / count-coverage % rules.
  */
 export function pathASampleSize(
@@ -52,6 +57,9 @@ export function pathASampleSize(
   _coveragePercentOverride?: number | null,
 ): {
   score: number
+  baseSize: number
+  expectedErrorAdjustment: number
+  evidenceAdjustment: number
   matrixSize: number
   coverageSize: number | null
   calculated: number
@@ -61,19 +69,34 @@ export function pathASampleSize(
   isHundredPercent: boolean
 } {
   const score = inputs.riskLevel + inputs.expectedError + inputs.otherEvidence
-  const row = RISK_SCORE_MATRIX.find((r) => score >= r.min && score <= r.max)
-  const matrixSize = row?.size ?? 15
+  const baseSize = PATH_A_BASE_SIZES[inputs.riskLevel]
+  const expectedErrorAdjustment =
+    PATH_A_EXPECTED_ERROR_ADJUSTMENTS[inputs.expectedError]
+  const evidenceAdjustment = PATH_A_EVIDENCE_ADJUSTMENTS[inputs.otherEvidence]
+  const adjusted = baseSize + expectedErrorAdjustment + evidenceAdjustment
+  const matrixSize = Math.min(PATH_A_MAX_SIZE, Math.max(PATH_A_MIN_SIZE, adjusted))
   const finalSize =
     transactionCount > 0 ? Math.min(matrixSize, transactionCount) : 0
 
+  const fmtAdj = (n: number) => (n >= 0 ? `+${n}` : `${n}`)
+
   return {
     score,
+    baseSize,
+    expectedErrorAdjustment,
+    evidenceAdjustment,
     matrixSize,
     coverageSize: null,
     calculated: finalSize,
     finalSize,
     coveragePercent: null,
-    ruleLabel: `Path A risk matrix (score ${score}) → ${matrixSize} items${
+    ruleLabel: `Path A: base ${baseSize} (risk ${inputs.riskLevel}) ${fmtAdj(
+      expectedErrorAdjustment,
+    )} expected error ${fmtAdj(evidenceAdjustment)} evidence → ${matrixSize} items${
+      adjusted !== matrixSize
+        ? ` (clamped to ${PATH_A_MIN_SIZE}–${PATH_A_MAX_SIZE} band)`
+        : ''
+    }${
       transactionCount > 0 && matrixSize > transactionCount
         ? ` (capped at population ${transactionCount})`
         : ''
@@ -84,50 +107,59 @@ export function pathASampleSize(
 
 /**
  * Path B — value-coverage sizing.
- * Determines how many items are needed to meet monetary coverage guidance.
- * Does not lock which items are selected — selection methods do that.
+ * Selects the fewest highest-value transactions needed to meet the auditor-specified
+ * coverage percentage of total ledger value.
+ * @param transactions   Active (non-excluded) transactions
+ * @param coveragePct    Auditor-specified target, e.g. 50 means 50%
  */
 export function pathBSizing(
   transactions: LedgerTransaction[],
-  minimumItemCount = DEFAULT_MIN_ITEM_COUNT,
+  coveragePct = 50,
 ): PathBResult {
+  const clampedPct = Math.min(100, Math.max(1, coveragePct))
   const total = coverageSum(transactions)
-  const tierRule =
-    VALUE_COVERAGE_TIERS.find((t) =>
-      t.maxInclusive == null ? true : total <= t.maxInclusive,
-    ) ?? VALUE_COVERAGE_TIERS[VALUE_COVERAGE_TIERS.length - 1]
+  const target = (clampedPct / 100) * total
 
-  const percentValue = Math.ceil(total * tierRule.percent)
-  const tierMinimum = tierRule.tier === 1 ? total : tierRule.minimumRequired
-  const requiredCoverageValue = Math.min(Math.max(percentValue, tierMinimum), total)
-  const minItems = Math.min(minimumItemCount, transactions.length)
+  // Sort transactions by amount (descending), then risk level (High -> Medium -> Low)
+  const sorted = [...transactions].sort((a, b) => {
+    const amtA = Math.abs(a.coverageAmount)
+    const amtB = Math.abs(b.coverageAmount)
+    if (amtA !== amtB) {
+      return amtB - amtA
+    }
+    const riskVal = (r?: string) => {
+      const l = (r || '').toLowerCase()
+      if (l.includes('high')) return 3
+      if (l.includes('medium') || l.includes('med')) return 2
+      return 1
+    }
+    return riskVal(b.riskLevel) - riskVal(a.riskLevel)
+  })
 
-  const sorted = [...transactions].sort(
-    (a, b) => Math.abs(b.coverageAmount) - Math.abs(a.coverageAmount),
-  )
-
-  const provisionalIds: string[] = []
+  let provisionalIds: string[] = []
   let running = 0
-  for (const item of sorted) {
-    provisionalIds.push(item.id)
-    running += Math.abs(item.coverageAmount)
-    if (running >= requiredCoverageValue && provisionalIds.length >= minItems) {
-      break
+
+  if (sorted.length > 0 && total > 0) {
+    // Single-transaction rule: if the top item alone meets the target, take only it
+    if (Math.abs(sorted[0].coverageAmount) >= target) {
+      provisionalIds = [sorted[0].id]
+      running = Math.abs(sorted[0].coverageAmount)
+    } else {
+      for (const item of sorted) {
+        provisionalIds.push(item.id)
+        running += Math.abs(item.coverageAmount)
+        if (running >= target) {
+          break
+        }
+      }
     }
   }
 
-  while (provisionalIds.length < minItems && provisionalIds.length < sorted.length) {
-    const next = sorted[provisionalIds.length]
-    if (!next) break
-    provisionalIds.push(next.id)
-    running += Math.abs(next.coverageAmount)
-  }
-
   return {
-    tier: tierRule.tier,
-    coveragePercent: tierRule.percent,
-    minimumRequired: tierMinimum,
-    requiredCoverageValue,
+    tier: 1,
+    coveragePercent: clampedPct / 100,
+    minimumRequired: target,
+    requiredCoverageValue: target,
     suggestedSampleSize: Math.min(provisionalIds.length, transactions.length),
     provisionalIds,
     provisionalCoverageValue: running,
@@ -140,6 +172,8 @@ export function suggestSampleSizeForPath(params: {
   pathA: PathAInputs
   transactions: LedgerTransaction[]
   coveragePercentOverride?: number | null
+  /** Path B only: auditor-specified coverage % (1–100). Defaults to 50 if not provided. */
+  pathBCoveragePct?: number
 }): {
   suggestedSize: number
   coveragePercent: number | null
@@ -147,7 +181,7 @@ export function suggestSampleSizeForPath(params: {
   pathADetail: ReturnType<typeof pathASampleSize> | null
   pathBDetail: PathBResult | null
 } {
-  const { path, pathA, transactions, coveragePercentOverride } = params
+  const { path, pathA, transactions, coveragePercentOverride, pathBCoveragePct } = params
   const n = transactions.length
 
   if (path === 'pathA') {
@@ -161,11 +195,12 @@ export function suggestSampleSizeForPath(params: {
     }
   }
 
-  const detail = pathBSizing(transactions)
+  const pct = pathBCoveragePct ?? 50
+  const detail = pathBSizing(transactions, pct)
   return {
     suggestedSize: detail.suggestedSampleSize,
     coveragePercent: detail.coveragePercent,
-    ruleLabel: `Path B value coverage: Tier ${detail.tier} (${Math.round(detail.coveragePercent * 100)}%) requires ${formatMoney(detail.requiredCoverageValue)} → ${detail.suggestedSampleSize} items (selection method chooses which).`,
+    ruleLabel: `Path B value coverage: ${pct}% coverage target requires ${formatMoney(detail.requiredCoverageValue)} → ${detail.suggestedSampleSize} item(s) selected by value.`,
     pathADetail: null,
     pathBDetail: detail,
   }

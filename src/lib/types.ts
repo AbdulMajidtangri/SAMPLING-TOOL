@@ -7,7 +7,6 @@ export type WizardStep =
   | 'design'
   | 'selection'
   | 'testing'
-  | 'evaluation'
   | 'workingPaper'
 
 export type StandardField =
@@ -18,10 +17,11 @@ export type StandardField =
   | 'debit'
   | 'credit'
   | 'amount'
+  | 'riskLevel'
 
 export type MappingConfidence = 'high' | 'medium' | 'low' | 'none'
 
-export type SelectionMethod = 'random' | 'systematic' | 'haphazard' | 'block'
+export type SelectionMethod = 'random' | 'systematic' | 'haphazard' | 'block' | 'valueCoverage'
 
 export type SampleSizePath = 'pathA' | 'pathB'
 
@@ -89,6 +89,7 @@ export interface LedgerTransaction {
   coverageResolution?: CoverageResolution
   highValue: boolean
   stratumKey: string
+  riskLevel: 'Low' | 'Medium' | 'High'
   extras: Record<string, string>
 }
 
@@ -114,14 +115,13 @@ export interface PopulationSummary {
 }
 
 export interface EngagementMeta {
+  /** Entered on the working paper screen, not in the wizard. */
   wpReference: string
   clientName: string
   auditArea: string
+  /** Entered on the working paper screen, not in the wizard. */
   period: string
-  testType: string
-  assertion: string
   objective: string
-  samplingUnit: string
   errorDefinition: string
 }
 
@@ -135,6 +135,8 @@ export interface DesignInputs {
   tolerableError: string
   sampleSizePath: SampleSizePath
   pathA: PathAInputs
+  /** Path B: auditor-specified coverage target as a percentage (1–100) */
+  pathBCoveragePercent: number
 }
 
 export interface PathAInputs {
@@ -189,26 +191,6 @@ export interface SelectionMeta {
   selectedIds: string[]
 }
 
-export interface TestingResult {
-  transactionId: string
-  tested: boolean
-  exception: boolean
-  exceptionValue: number
-  nature: string
-  notes: string
-}
-
-export interface EvaluationState {
-  exceptionCount: number
-  exceptionValue: number
-  natureSummary: string
-  widerIssue: 'yes' | 'no' | 'unclear'
-  furtherTesting: 'yes' | 'no'
-  conclusion: string
-  reviewerComments: string
-  untestedRemainderBasis: string
-}
-
 export interface SignOffState {
   preparedBy: string
   preparedDate: string
@@ -230,7 +212,11 @@ export interface FirmConfigSnapshot {
   smallPopHighRiskMinPct: number
   smallPopHighRiskMaxPct: number
   largePopCoverageByRisk: Record<RiskLevel, number>
-  riskScoreMatrix: Array<{ min: number; max: number; size: number }>
+  pathABaseSizes: Record<RiskScore, number>
+  pathAExpectedErrorAdjustments: Record<RiskScore, number>
+  pathAEvidenceAdjustments: Record<RiskScore, number>
+  pathAMinSize: number
+  pathAMaxSize: number
   valueCoverageTiers: Array<{
     tier: number
     maxInclusive: number | null
@@ -256,6 +242,7 @@ export const STANDARD_FIELD_LABELS: Record<StandardField, string> = {
   debit: 'Debit',
   credit: 'Credit',
   amount: 'Amount (alt. if no Debit/Credit)',
+  riskLevel: 'Risk Level (optional - Low/Medium/High)',
 }
 
 /** Date is required only when a date-like header exists on the sheet. */
@@ -269,6 +256,7 @@ export const MAPPING_FIELD_ORDER: StandardField[] = [
   'credit',
   'accountNo',
   'amount',
+  'riskLevel',
 ]
 
 export const POSITIONAL_FIELD_ORDER: StandardField[] = [

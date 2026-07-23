@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   activeTransactions,
   buildTransactions,
@@ -27,15 +27,16 @@ import {
   selectHaphazard,
   selectRandom,
   selectSystematic,
+  runPathBSelection,
 } from './lib/selection'
 import {
-  ASSERTION_OPTIONS,
   AUDIT_AREA_OPTIONS,
   DEFAULT_HIGH_VALUE_THRESHOLD,
-  FILE_ASSEMBLY_DEADLINE_DAYS,
-  TEST_TYPE_OPTIONS,
+  FIRM_DESCRIPTOR,
+  FIRM_NAME,
   captureFirmConfigSnapshot,
 } from './lib/firmConfig'
+import { PeterCoMark } from './components/Logo'
 import { recommendMethod } from './lib/methodRecommend'
 import { buildPopulationSummary } from './lib/populationSummary'
 import { hashExtractedData } from './lib/hash'
@@ -67,6 +68,7 @@ import {
 } from './lib/types'
 import './App.css'
 import { type MainScreenId } from './lib/navigation'
+import { NumberTextInput, ComboField } from './components/FormFields'
 
 const STEPS: WizardStep[] = [
   'upload',
@@ -77,7 +79,6 @@ const STEPS: WizardStep[] = [
   'design',
   'selection',
   'testing',
-  'evaluation',
 ]
 
 const WORKSPACE_SECTIONS: Array<{
@@ -94,9 +95,59 @@ const WORKSPACE_SECTIONS: Array<{
   { id: 'testing', title: '7. Selected items', blurb: 'Review list & open WP' },
 ]
 
+/** DOM id for smooth scroll — worksheet shares the mapping section anchor. */
+function sectionDomId(step: WizardStep): string {
+  const mapped =
+    step === 'worksheet'
+      ? 'mapping'
+      : step === 'workingPaper'
+        ? 'testing'
+        : step
+  return `section-${mapped}`
+}
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2
+}
+
+const SECTION_SCROLL_OFFSET_PX = 88
+const SECTION_SCROLL_DURATION_MS = 950
+
+function scrollToStepSection(step: WizardStep) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const el = document.getElementById(sectionDomId(step))
+      if (!el) return
+
+      const prefersReducedMotion = window.matchMedia(
+        '(prefers-reduced-motion: reduce)',
+      ).matches
+      if (prefersReducedMotion) {
+        el.scrollIntoView({ behavior: 'auto', block: 'start' })
+        return
+      }
+
+      const startY = window.scrollY
+      const targetY =
+        el.getBoundingClientRect().top + window.scrollY - SECTION_SCROLL_OFFSET_PX
+      const distance = targetY - startY
+      if (Math.abs(distance) < 2) return
+
+      const startedAt = performance.now()
+
+      function animateScroll(now: number) {
+        const progress = Math.min((now - startedAt) / SECTION_SCROLL_DURATION_MS, 1)
+        window.scrollTo(0, startY + distance * easeInOutCubic(progress))
+        if (progress < 1) requestAnimationFrame(animateScroll)
+      }
+
+      requestAnimationFrame(animateScroll)
+    })
+  })
+}
+
 const DEFAULT_SIZE_RATIONALE =
   'Accepted suggested population coverage per firm guidance.'
-const DEFAULT_SAMPLING_UNIT = 'Individual expense voucher / document'
 const DEFAULT_HIGH_VALUE_BASIS =
   'Absolute coverage amount at or above the stated threshold (specific testing, not sampling).'
 const PATH_B_BELOW_REQUIRED_WARNING =
@@ -140,10 +191,7 @@ function defaultEngagement(): EngagementMeta {
     clientName: '',
     auditArea: 'Expenses',
     period: '',
-    testType: 'Tests of details — vouching',
-    assertion: ASSERTION_OPTIONS[0] ?? 'Existence / Occurrence',
     objective: '',
-    samplingUnit: DEFAULT_SAMPLING_UNIT,
     errorDefinition: '',
   }
 }
@@ -159,6 +207,7 @@ function defaultDesignInputs(): DesignInputs {
     tolerableError: '',
     sampleSizePath: 'pathA',
     pathA: { riskLevel: 3, expectedError: 2, otherEvidence: 2 },
+    pathBCoveragePercent: 50,
   }
 }
 
@@ -201,13 +250,6 @@ function defaultSignOff(): SignOffState {
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10)
-}
-
-function addDaysIso(dateIso: string, days: number): string {
-  const d = new Date(`${dateIso}T00:00:00`)
-  if (Number.isNaN(d.getTime())) return ''
-  d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
 }
 
 /** Dropdown/chip label: show real ledger column position + header text. */
@@ -261,10 +303,11 @@ export default function App() {
   const [haphazardBiasConfirmed, setHaphazardBiasConfirmed] = useState(false)
 
   const [selected, setSelected] = useState<LedgerTransaction[]>([])
-  const [selectionMeta, setSelectionMeta] = useState<SelectionMeta | null>(null)
+  const [, setSelectionMeta] = useState<SelectionMeta | null>(null)
   const [pathBReview, setPathBReview] = useState<PathBReview | null>(null)
   const [signOff, setSignOff] = useState<SignOffState>(defaultSignOff())
   const [configSnapshot, setConfigSnapshot] = useState<FirmConfigSnapshot | null>(null)
+  const scrollOnStepRef = useRef(true)
 
   const sheet = ledger?.sheets[sheetIndex]
   const headers = useMemo(() => {
@@ -276,7 +319,6 @@ export default function App() {
   }, [sheet, headerRow])
 
   const activePop = useMemo(() => activeTransactions(transactions), [transactions])
-  const dataHash = useMemo(() => hashExtractedData(transactions), [transactions])
 
   const liveSummary = useMemo(
     () => buildPopulationSummary(transactions),
@@ -306,11 +348,13 @@ export default function App() {
       path: designInputs.sampleSizePath,
       pathA: designInputs.pathA,
       transactions: activePop,
+      pathBCoveragePct: designInputs.pathBCoveragePercent,
     })
   }, [
     activePop,
     designInputs.sampleSizePath,
     designInputs.pathA,
+    designInputs.pathBCoveragePercent,
   ])
 
   const dateHeaderPresent = useMemo(
@@ -427,11 +471,14 @@ export default function App() {
         setError('No worksheets found in this file.')
         return
       }
+      // Replacing the ledger restarts the engagement: every section reloads fresh.
       invalidateFrom('upload')
+      setEngagement(defaultEngagement())
+      setDesignInputs(defaultDesignInputs())
       setLedger(parsed)
       setSheetIndex(0)
       prepareSheet(parsed, 0)
-      setStep('worksheet')
+      advanceToStep('worksheet')
     } catch {
       setError('Could not read this file. Please upload an Excel workbook (.xlsx / .xls).')
     } finally {
@@ -565,6 +612,10 @@ export default function App() {
       setError(result.errors[0])
       return
     }
+    if (result.transactions.length === 0) {
+      setError('Uploaded ledger has no data rows.')
+      return
+    }
 
     // Keep needsCoverageResolution rows for auditor resolution on confirm step.
     invalidateFrom('mapping')
@@ -574,7 +625,7 @@ export default function App() {
     setPopulationSummary(buildPopulationSummary(result.transactions))
     setPopulationConfirmed(false)
     setExcludeDrafts({})
-    setStep('confirm')
+    advanceToStep('confirm')
   }
 
   function resolveRow(id: string, resolution: CoverageResolution) {
@@ -656,19 +707,14 @@ export default function App() {
     setPopulationSummary(summary)
     setPopulationConfirmed(true)
     setError('')
-    setStep('planning')
+    advanceToStep('planning')
   }
 
   function continueFromPlanning() {
     const required: Array<[string, string]> = [
-      [engagement.wpReference, 'WP reference'],
       [engagement.clientName, 'Client name'],
       [engagement.auditArea, 'Audit area'],
-      [engagement.period, 'Period'],
-      [engagement.testType, 'Test type'],
-      [engagement.assertion, 'Assertion'],
       [engagement.objective, 'Objective'],
-      [engagement.samplingUnit, 'Sampling unit'],
       [engagement.errorDefinition, 'Error definition'],
     ]
     const missing = required.filter(([v]) => !v.trim()).map(([, label]) => label)
@@ -702,11 +748,16 @@ export default function App() {
       path: designInputs.sampleSizePath,
       pathA: designInputs.pathA,
       transactions: pop,
+      pathBCoveragePct: designInputs.pathBCoveragePercent,
     })
+    
+    const isPathB = designInputs.sampleSizePath === 'pathB'
+    const finalMethod = isPathB ? 'valueCoverage' : recommendation.recommended
+
     setSampleDesign({
-      ...defaultSampleDesign(recommendation.recommended),
-      recommendedMethod: recommendation.recommended,
-      selectedMethod: recommendation.recommended,
+      ...defaultSampleDesign(finalMethod),
+      recommendedMethod: finalMethod,
+      selectedMethod: finalMethod,
       suggestedSize: suggestion.suggestedSize,
       confirmedSize: suggestion.suggestedSize,
       coveragePercentUsed: suggestion.coveragePercent,
@@ -714,7 +765,7 @@ export default function App() {
       sizeRationale: DEFAULT_SIZE_RATIONALE,
     })
     setError('')
-    setStep('design')
+    advanceToStep('design')
   }
 
   function updateDesignMethod(next: SelectionMethod) {
@@ -782,7 +833,7 @@ export default function App() {
     }))
 
     setError('')
-    setStep('selection')
+    advanceToStep('selection')
   }
 
   function toggleHaphazard(id: string) {
@@ -838,21 +889,41 @@ export default function App() {
         outcome = selectSystematic(pop, size)
       } else if (method === 'block') {
         outcome = selectBlock(pop, size, blockStart, blockRationale)
-      } else {
+      } else if (method === 'haphazard') {
         outcome = selectHaphazard(pop, haphazardIds, haphazardBiasConfirmed)
+      } else if (method === 'valueCoverage') {
+        const selected = runPathBSelection(pop, designInputs.pathBCoveragePercent)
+        outcome = {
+          selected,
+          meta: {
+            method: 'valueCoverage',
+            timestamp: new Date().toISOString(),
+            toolVersion: TOOL_VERSION,
+            dataHash: hashExtractedData(pop),
+            selectedIds: selected.map((t) => t.id),
+          },
+        }
+      } else {
+        throw new Error(`Unknown selection method: ${method}`)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Selection failed.')
       return
     }
 
-    if (outcome.selected.length !== size) {
+    if (method !== 'valueCoverage' && outcome.selected.length !== size) {
       setError('Selected item count must equal the confirmed sample size.')
       return
     }
 
     setError('')
     setSelected(outcome.selected)
+    if (method === 'valueCoverage') {
+      setSampleDesign((prev) => ({
+        ...prev,
+        confirmedSize: outcome.selected.length,
+      }))
+    }
     setSelectionMeta({
       ...outcome.meta,
       rationale: sampleDesign.methodOverrideReason || outcome.meta.rationale,
@@ -875,7 +946,7 @@ export default function App() {
       setPathBReview(null)
     }
     setWarnings(nextWarnings)
-    setStep('testing')
+    advanceToStep('testing')
   }
 
   function finishTesting() {
@@ -893,31 +964,6 @@ export default function App() {
     }))
     setStep('testing')
     setScreen('workingPaper')
-  }
-
-  function lockWorkingPaper() {
-    if (!signOff.reviewedBy.trim()) {
-      setError('Reviewed by is required before locking the working paper.')
-      return
-    }
-    if (signOff.locked && signOff.amendmentNote.trim() && !signOff.amendmentReviewerApproved) {
-      setError(
-        'Amendment note changed while locked — amendment reviewer approval is required.',
-      )
-      return
-    }
-    const lockDate = todayIsoDate()
-    setSignOff((prev) => ({
-      ...prev,
-      locked: true,
-      lockDate,
-      reviewStatus: 'locked',
-      reviewedDate: prev.reviewedDate || lockDate,
-      fileAssemblyDeadline:
-        prev.fileAssemblyDeadline ||
-        addDaysIso(lockDate, FILE_ASSEMBLY_DEADLINE_DAYS),
-    }))
-    setError('')
   }
 
   function resetAll() {
@@ -956,7 +1002,7 @@ export default function App() {
   const activeWorkspaceStep: WizardStep =
     step === 'worksheet'
       ? 'mapping'
-      : step === 'evaluation' || step === 'workingPaper'
+      : step === 'workingPaper'
         ? 'testing'
         : step
 
@@ -964,7 +1010,7 @@ export default function App() {
     const mapped =
       id === 'worksheet'
         ? 'mapping'
-        : id === 'evaluation' || id === 'workingPaper'
+        : id === 'workingPaper'
           ? 'testing'
           : id
     return WORKSPACE_SECTIONS.findIndex((s) => s.id === mapped)
@@ -1022,14 +1068,27 @@ export default function App() {
 
   const canOpenWorkingPaper = selected.length > 0
 
+  function advanceToStep(next: WizardStep) {
+    scrollOnStepRef.current = true
+    setScreen('samplingWorkspace')
+    setStep(next)
+  }
+
+  useEffect(() => {
+    if (screen !== 'samplingWorkspace' || !scrollOnStepRef.current) return
+    scrollOnStepRef.current = false
+    scrollToStepSection(step)
+  }, [step, screen])
+
   function goToSection(id: WizardStep) {
     if (!sectionUnlocked(id) && id !== 'upload') return
-    setScreen('samplingWorkspace')
-    if (id === 'mapping' && ledger) setStep(transactions.length ? 'mapping' : 'worksheet')
-    else setStep(id)
-    requestAnimationFrame(() => {
-      document.getElementById(`section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
+    const target =
+      id === 'mapping' && ledger
+        ? transactions.length
+          ? 'mapping'
+          : 'worksheet'
+        : id
+    advanceToStep(target)
   }
 
   function openWorkingPaperPreview() {
@@ -1058,9 +1117,9 @@ export default function App() {
     <div className="app-shell">
       <header className="app-topbar">
         <div className="topbar-brand">
-          <div className="brand-mark" aria-hidden="true" />
+          <PeterCoMark className="brand-mark" />
           <div>
-            <p className="brand">Audit Sampling</p>
+            <p className="brand">{FIRM_NAME} · Audit Sampling</p>
             <p className="file-chip">{ledger?.fileName ?? 'No file yet'}</p>
           </div>
         </div>
@@ -1200,10 +1259,7 @@ export default function App() {
                     <button
                       type="button"
                       className="primary"
-                      onClick={() => {
-                        setStep('mapping')
-                        goToSection('mapping')
-                      }}
+                      onClick={() => advanceToStep('mapping')}
                     >
                       Continue
                     </button>
@@ -1592,18 +1648,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="form-grid grid-3">
-                  <div>
-                    <label htmlFor="wpRef">WP reference</label>
-                    <input
-                      id="wpRef"
-                      value={engagement.wpReference}
-                      onChange={(e) => {
-                        invalidateFrom('planning')
-                        setEngagement((prev) => ({ ...prev, wpReference: e.target.value }))
-                      }}
-                    />
-                  </div>
+                <div className="form-grid grid-2">
                   <div>
                     <label htmlFor="clientName">Client name</label>
                     <input
@@ -1617,60 +1662,15 @@ export default function App() {
                   </div>
                   <div>
                     <label htmlFor="auditArea">Audit area</label>
-                    <select
+                    <ComboField
                       id="auditArea"
                       value={engagement.auditArea}
-                      onChange={(e) => {
+                      options={AUDIT_AREA_OPTIONS}
+                      onChange={(next) => {
                         invalidateFrom('planning')
-                        setEngagement((prev) => ({ ...prev, auditArea: e.target.value }))
+                        setEngagement((prev) => ({ ...prev, auditArea: next }))
                       }}
-                    >
-                      {AUDIT_AREA_OPTIONS.map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="period">Period</label>
-                    <input
-                      id="period"
-                      value={engagement.period}
-                      onChange={(e) => {
-                        invalidateFrom('planning')
-                        setEngagement((prev) => ({ ...prev, period: e.target.value }))
-                      }}
-                      placeholder="e.g. Year ended 30 June 2026"
                     />
-                  </div>
-                  <div>
-                    <label htmlFor="testType">Test type</label>
-                    <select
-                      id="testType"
-                      value={engagement.testType}
-                      onChange={(e) => {
-                        invalidateFrom('planning')
-                        setEngagement((prev) => ({ ...prev, testType: e.target.value }))
-                      }}
-                    >
-                      {TEST_TYPE_OPTIONS.map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="assertion">Assertion</label>
-                    <select
-                      id="assertion"
-                      value={engagement.assertion}
-                      onChange={(e) => {
-                        invalidateFrom('planning')
-                        setEngagement((prev) => ({ ...prev, assertion: e.target.value }))
-                      }}
-                    >
-                      {ASSERTION_OPTIONS.map((opt) => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
                   </div>
                 </div>
 
@@ -1682,16 +1682,6 @@ export default function App() {
                   onChange={(e) => {
                     invalidateFrom('planning')
                     setEngagement((prev) => ({ ...prev, objective: e.target.value }))
-                  }}
-                />
-
-                <label htmlFor="unit">Sampling unit</label>
-                <input
-                  id="unit"
-                  value={engagement.samplingUnit}
-                  onChange={(e) => {
-                    invalidateFrom('planning')
-                    setEngagement((prev) => ({ ...prev, samplingUnit: e.target.value }))
                   }}
                 />
 
@@ -1816,10 +1806,36 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <p className="hint">
-                    Path B uses confirmed coverage value, tier rules, floor, and minimum item
-                    count. The provisional pass only suggests sample size.
-                  </p>
+                  <div className="form-grid grid-1" style={{ marginTop: '10px' }}>
+                    <div>
+                      <label htmlFor="pathBCoveragePct" style={{ fontWeight: 600 }}>
+                        Coverage target (%) — required
+                      </label>
+                      <p className="hint" style={{ marginBottom: '6px' }}>
+                        Enter the percentage of total ledger value you need to cover. The tool will automatically select the highest-value transactions until this target is reached.
+                      </p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <NumberTextInput
+                          id="pathBCoveragePct"
+                          min={1}
+                          max={100}
+                          emptyAs={50}
+                          style={{ width: '110px' }}
+                          value={designInputs.pathBCoveragePercent}
+                          onValueChange={(v) => {
+                            invalidateFrom('planning')
+                            setDesignInputs((prev) => ({ ...prev, pathBCoveragePercent: v }))
+                          }}
+                        />
+                        <span style={{ fontWeight: 600, fontSize: '1.05rem' }}>%</span>
+                        {coverageTotal > 0 && (
+                          <span className="hint" style={{ margin: 0 }}>
+                            → target: <strong>{formatMoney((designInputs.pathBCoveragePercent / 100) * coverageTotal)}</strong> of {formatMoney(coverageTotal)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 )}
 
                 <div className="form-grid grid-2">
@@ -1905,12 +1921,19 @@ export default function App() {
                 <select
                   id="selectedMethod"
                   value={sampleDesign.selectedMethod}
+                  disabled={designInputs.sampleSizePath === 'pathB'}
                   onChange={(e) => updateDesignMethod(e.target.value as SelectionMethod)}
                 >
-                  <option value="random">Random</option>
-                  <option value="systematic">Systematic</option>
-                  <option value="haphazard">Haphazard / Manual</option>
-                  <option value="block">Block</option>
+                  {designInputs.sampleSizePath === 'pathB' ? (
+                    <option value="valueCoverage">Value-Based Coverage Selection</option>
+                  ) : (
+                    <>
+                      <option value="random">Random</option>
+                      <option value="systematic">Systematic</option>
+                      <option value="haphazard">Haphazard / Manual</option>
+                      <option value="block">Block</option>
+                    </>
+                  )}
                 </select>
 
                 {sampleDesign.selectedMethod !== sampleDesign.recommendedMethod && (
@@ -1951,36 +1974,35 @@ export default function App() {
 
                 {designInputs.sampleSizePath === 'pathA' && sizeSuggestion.pathADetail && (
                   <p className="hint">
-                    Path A scores: risk {designInputs.pathA.riskLevel}, expected error{' '}
-                    {designInputs.pathA.expectedError}, other evidence{' '}
-                    {designInputs.pathA.otherEvidence}. Matrix score{' '}
-                    {sizeSuggestion.pathADetail.score} → matrix size{' '}
+                    Path A: base {sizeSuggestion.pathADetail.baseSize} (risk{' '}
+                    {designInputs.pathA.riskLevel}), expected error{' '}
+                    {sizeSuggestion.pathADetail.expectedErrorAdjustment >= 0 ? '+' : ''}
+                    {sizeSuggestion.pathADetail.expectedErrorAdjustment}, other evidence{' '}
+                    {sizeSuggestion.pathADetail.evidenceAdjustment >= 0 ? '+' : ''}
+                    {sizeSuggestion.pathADetail.evidenceAdjustment} → sample size{' '}
                     {sizeSuggestion.pathADetail.matrixSize}.
                   </p>
                 )}
 
                 {designInputs.sampleSizePath === 'pathB' && sizeSuggestion.pathBDetail && (
                   <p className="hint">
-                    Path B tier {sizeSuggestion.pathBDetail.tier}:{' '}
-                    {Math.round(sizeSuggestion.pathBDetail.coveragePercent * 100)}% coverage
-                    requires {formatMoney(sizeSuggestion.pathBDetail.requiredCoverageValue)}{' '}
-                    (provisional {sizeSuggestion.pathBDetail.suggestedSampleSize} items — not
-                    final selection).
+                    Path B: 50% coverage requires {formatMoney(sizeSuggestion.pathBDetail.requiredCoverageValue)} (determines exact final selection of {sizeSuggestion.pathBDetail.suggestedSampleSize} items).
                   </p>
                 )}
 
                 <label htmlFor="confirmedSize">Final confirmed sample size</label>
-                <input
+                <NumberTextInput
                   id="confirmedSize"
-                  type="number"
                   min={1}
                   max={Math.max(1, activePop.length)}
+                  emptyAs={1}
                   value={sampleDesign.confirmedSize}
-                  onChange={(e) => {
+                  disabled={designInputs.sampleSizePath === 'pathB'}
+                  onValueChange={(v) => {
                     invalidateFrom('design')
                     setSampleDesign((prev) => ({
                       ...prev,
-                      confirmedSize: Number(e.target.value),
+                      confirmedSize: v,
                     }))
                     setSizeWarning('')
                   }}
@@ -2073,6 +2095,12 @@ export default function App() {
                   </div>
                 </div>
 
+                {sampleDesign.selectedMethod === 'valueCoverage' && (
+                  <div className="banner info" style={{ backgroundColor: '#e8f0fe', color: '#1a73e8', padding: '12px', borderRadius: '6px', marginBottom: '15px', border: '1px solid #d2e3fc' }}>
+                    <strong>Deterministic Value-Based Coverage Selection:</strong> This will select the highest value transactions (amount descending, tie-breaking with Risk Level High &rarr; Medium &rarr; Low) to achieve at least 50% coverage of the total ledger value.
+                  </div>
+                )}
+
                 {sampleDesign.selectedMethod === 'systematic' && (
                   <div className="banner warn">
                     Systematic selection may follow a periodicity pattern. Review for pattern
@@ -2083,15 +2111,15 @@ export default function App() {
                 {sampleDesign.selectedMethod === 'block' && (
                   <>
                     <label htmlFor="blockStart">Block start index (0-based)</label>
-                    <input
+                    <NumberTextInput
                       id="blockStart"
-                      type="number"
                       min={0}
                       max={Math.max(0, activePop.length - sampleDesign.confirmedSize)}
+                      emptyAs={0}
                       value={blockStart}
-                      onChange={(e) => {
+                      onValueChange={(v) => {
                         invalidateFrom('selection')
-                        setBlockStart(Number(e.target.value))
+                        setBlockStart(v)
                       }}
                     />
                     <label htmlFor="blockRationale">Rationale for block selection</label>
@@ -2160,24 +2188,35 @@ export default function App() {
                   <>
                     <h3>Selected transactions ({selected.length})</h3>
                     {designInputs.sampleSizePath === 'pathB' && pathBReview && (
-                      <div className="stat-grid">
-                        <div>
-                          <span>Selected coverage</span>
-                          <strong>{formatMoney(pathBReview.selectedCoverage)}</strong>
+                      <>
+                        <div className="stat-grid">
+                          <div>
+                            <span>Selected coverage</span>
+                            <strong>{formatMoney(pathBReview.selectedCoverage)}</strong>
+                          </div>
+                          <div>
+                            <span>Coverage achieved</span>
+                            <strong>{pathBReview.coverageAchievedPercent.toFixed(1)}%</strong>
+                          </div>
+                          <div>
+                            <span>Untested remainder value</span>
+                            <strong>{formatMoney(pathBReview.untestedValue)}</strong>
+                          </div>
+                          <div>
+                            <span>Untested remainder count</span>
+                            <strong>{pathBReview.untestedCount}</strong>
+                          </div>
                         </div>
-                        <div>
-                          <span>Coverage achieved</span>
-                          <strong>{pathBReview.coverageAchievedPercent.toFixed(1)}%</strong>
-                        </div>
-                        <div>
-                          <span>Untested remainder value</span>
-                          <strong>{formatMoney(pathBReview.untestedValue)}</strong>
-                        </div>
-                        <div>
-                          <span>Untested remainder count</span>
-                          <strong>{pathBReview.untestedCount}</strong>
-                        </div>
-                      </div>
+                        {pathBReview.coverageAchievedPercent >= designInputs.pathBCoveragePercent ? (
+                          <div className="banner success" style={{ backgroundColor: '#e6f4ea', color: '#137333', padding: '10px', borderRadius: '4px', marginBottom: '15px', border: '1px solid #ceead6' }}>
+                            ✓ Confirmed: Selection meets the {designInputs.pathBCoveragePercent}% monetary coverage target (Achieved: {pathBReview.coverageAchievedPercent.toFixed(1)}%).
+                          </div>
+                        ) : (
+                          <div className="banner error" style={{ backgroundColor: '#fce8e6', color: '#c5221f', padding: '10px', borderRadius: '4px', marginBottom: '15px', border: '1px solid #fad2cf' }}>
+                            ✗ Warning: Selection does not meet the {designInputs.pathBCoveragePercent}% monetary coverage target (Achieved: {pathBReview.coverageAchievedPercent.toFixed(1)}%).
+                          </div>
+                        )}
+                      </>
                     )}
                     <div className="preview-table-wrap">
                       <table>
@@ -2189,6 +2228,7 @@ export default function App() {
                             <th>Debit</th>
                             <th>Credit</th>
                             <th>Coverage</th>
+                            {designInputs.sampleSizePath === 'pathB' && <th>Risk Level</th>}
                           </tr>
                         </thead>
                         <tbody>
@@ -2200,6 +2240,7 @@ export default function App() {
                               <td>{formatMoney(t.debit)}</td>
                               <td>{formatMoney(t.credit)}</td>
                               <td>{formatMoney(t.coverageAmount)}</td>
+                              {designInputs.sampleSizePath === 'pathB' && <td>{t.riskLevel || '—'}</td>}
                             </tr>
                           ))}
                         </tbody>
@@ -2218,7 +2259,7 @@ export default function App() {
                     <h2>Selected items</h2>
                     <p className="section-lead">
                       These are the transactions selected for testing. Open the working
-                      paper to print or export this list — no conclusion is required.
+                      paper to print or export this list.
                     </p>
                   </div>
                 </div>
@@ -2245,6 +2286,7 @@ export default function App() {
                         <th>Debit</th>
                         <th>Credit</th>
                         <th>Coverage</th>
+                        {designInputs.sampleSizePath === 'pathB' && <th>Risk Level</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -2257,6 +2299,7 @@ export default function App() {
                           <td>{formatMoney(t.debit)}</td>
                           <td>{formatMoney(t.credit)}</td>
                           <td>{formatMoney(t.coverageAmount)}</td>
+                          {designInputs.sampleSizePath === 'pathB' && <td>{t.riskLevel || '—'}</td>}
                         </tr>
                       ))}
                     </tbody>
@@ -2341,36 +2384,31 @@ export default function App() {
               ← Back to work
             </button>
             <div className="wp-toolbar-actions">
-              <button type="button" className="ghost" onClick={() => window.print()}>
-                Print / PDF
+              <button type="button" className="primary" onClick={() => window.print()}>
+                Print / Save as PDF
               </button>
               <button type="button" className="ghost" onClick={resetAll}>
                 New engagement
-              </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={lockWorkingPaper}
-                disabled={
-                  signOff.locked &&
-                  !!signOff.amendmentNote.trim() &&
-                  !signOff.amendmentReviewerApproved
-                }
-              >
-                {signOff.locked ? 'Confirm lock' : 'Lock working paper'}
               </button>
             </div>
           </div>
 
           <article className="working-paper isa230-wp">
             <header className="wp-masthead">
+              <div className="wp-firm">
+                <PeterCoMark className="wp-firm-mark" />
+                <div>
+                  <p className="wp-firm-name">{FIRM_NAME}</p>
+                  <p className="wp-firm-descriptor">{FIRM_DESCRIPTOR}</p>
+                </div>
+              </div>
               <div className="wp-std-line">
                 <span>Audit documentation</span>
                 <span>ISA 230</span>
               </div>
-              <h1>Sample Selection Working Paper</h1>
+              <h1>Audit Sample — Selected Items</h1>
               <p className="wp-subtitle">
-                Non-statistical audit sampling — selection schedule (ISA 230 / ISA 530)
+                Audit documentation per ISA 230
               </p>
 
               <table className="wp-id-table">
@@ -2379,117 +2417,141 @@ export default function App() {
                     <th scope="row">Client</th>
                     <td>{engagement.clientName || '—'}</td>
                     <th scope="row">Period</th>
-                    <td>{engagement.period || '—'}</td>
+                    <td>
+                      <input
+                        className="screen-only wp-inline-input"
+                        placeholder="e.g. Year ended 30 June 2026"
+                        aria-label="Period"
+                        value={engagement.period}
+                        onChange={(e) =>
+                          setEngagement((prev) => ({ ...prev, period: e.target.value }))
+                        }
+                      />
+                      <span className="print-only">{engagement.period || '—'}</span>
+                    </td>
                   </tr>
                   <tr>
                     <th scope="row">Subject / audit area</th>
                     <td>{engagement.auditArea || '—'}</td>
                     <th scope="row">WP reference</th>
-                    <td>{engagement.wpReference || '—'}</td>
+                    <td>
+                      <input
+                        className="screen-only wp-inline-input"
+                        placeholder="WP number"
+                        aria-label="WP reference"
+                        value={engagement.wpReference}
+                        onChange={(e) =>
+                          setEngagement((prev) => ({ ...prev, wpReference: e.target.value }))
+                        }
+                      />
+                      <span className="print-only">{engagement.wpReference || '—'}</span>
+                    </td>
                   </tr>
                   <tr>
                     <th scope="row">Prepared by</th>
-                    <td>{signOff.preparedBy || '—'}</td>
+                    <td>
+                      <input
+                        className="screen-only wp-inline-input"
+                        placeholder="Who performed the work"
+                        aria-label="Prepared by"
+                        value={signOff.preparedBy}
+                        onChange={(e) =>
+                          setSignOff((prev) => ({
+                            ...prev,
+                            preparedBy: e.target.value,
+                            reviewStatus:
+                              prev.reviewStatus === 'draft' ? 'prepared' : prev.reviewStatus,
+                            preparedDate: prev.preparedDate || todayIsoDate(),
+                          }))
+                        }
+                      />
+                      <span className="print-only">{signOff.preparedBy || '\u00A0'}</span>
+                    </td>
                     <th scope="row">Date work completed</th>
-                    <td>{signOff.preparedDate || '—'}</td>
+                    <td>
+                      <input
+                        className="screen-only wp-inline-input"
+                        type="date"
+                        aria-label="Date work completed"
+                        value={signOff.preparedDate}
+                        onChange={(e) =>
+                          setSignOff((prev) => ({ ...prev, preparedDate: e.target.value }))
+                        }
+                      />
+                      <span className="print-only">{signOff.preparedDate || '\u00A0'}</span>
+                    </td>
                   </tr>
                   <tr>
                     <th scope="row">Reviewed by</th>
-                    <td>{signOff.reviewedBy || '—'}</td>
+                    <td>
+                      <input
+                        className="screen-only wp-inline-input"
+                        placeholder="Reviewer name"
+                        aria-label="Reviewed by"
+                        value={signOff.reviewedBy}
+                        onChange={(e) =>
+                          setSignOff((prev) => ({
+                            ...prev,
+                            reviewedBy: e.target.value,
+                            reviewStatus: e.target.value.trim()
+                              ? 'reviewed'
+                              : prev.preparedBy
+                                ? 'prepared'
+                                : 'draft',
+                            reviewedDate: prev.reviewedDate || todayIsoDate(),
+                          }))
+                        }
+                      />
+                      <span className="print-only">{signOff.reviewedBy || '\u00A0'}</span>
+                    </td>
                     <th scope="row">Date of review</th>
-                    <td>{signOff.reviewedDate || '—'}</td>
+                    <td>
+                      <input
+                        className="screen-only wp-inline-input"
+                        type="date"
+                        aria-label="Date of review"
+                        value={signOff.reviewedDate}
+                        onChange={(e) =>
+                          setSignOff((prev) => ({ ...prev, reviewedDate: e.target.value }))
+                        }
+                      />
+                      <span className="print-only">{signOff.reviewedDate || '\u00A0'}</span>
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </header>
 
             <section>
-              <h2>1. Purpose of this working paper</h2>
+              <h2>1. Purpose</h2>
               <p>
-                This working paper records the selection of items for audit testing so that
-                an experienced auditor, having no previous connection with the audit, can
-                understand the nature, timing and extent of the selection procedures
-                performed (ISA 230.8–.9).
+                This working paper documents the items selected from the population for
+                audit testing, with identifying characteristics sufficient for traceability
+                (ISA 230.9(a)).
               </p>
               <p><strong>Audit objective:</strong> {engagement.objective || '—'}</p>
-              <p><strong>Test type:</strong> {engagement.testType || '—'}</p>
-              <p><strong>Assertion(s):</strong> {engagement.assertion || '—'}</p>
-              <p><strong>Sampling unit:</strong> {engagement.samplingUnit || '—'}</p>
+              <p><strong>Audit area:</strong> {engagement.auditArea || '—'}</p>
             </section>
 
             <section>
-              <h2>2. Nature of the procedure performed</h2>
-              <p>
-                Non-statistical sample selection from the client ledger population for the
-                subject area above. Selection performed using the tool’s confirmed sample
-                design for this engagement.
-              </p>
-              <p>
-                <strong>Selection method:</strong>{' '}
-                {methodLabel(sampleDesign.selectedMethod)}
-                {sampleDesign.methodOverrideReason
-                  ? ` (override rationale: ${sampleDesign.methodOverrideReason})`
-                  : ''}
-              </p>
-              {selectionMeta && (
-                <p className="wp-meta-line">
-                  Selection recorded {selectionMeta.timestamp}; tool v
-                  {selectionMeta.toolVersion}
-                  {selectionMeta.seed ? `; seed ${selectionMeta.seed}` : ''}
-                  {selectionMeta.rngAlgorithm
-                    ? `; RNG ${selectionMeta.rngAlgorithm}`
-                    : ''}
-                  {selectionMeta.interval != null
-                    ? `; interval ${selectionMeta.interval}`
-                    : ''}
-                  {selectionMeta.randomStart != null
-                    ? `; random start ${selectionMeta.randomStart}`
-                    : ''}
-                  .
-                </p>
-              )}
-            </section>
-
-            <section>
-              <h2>3. Source of information (population)</h2>
+              <h2>2. Population source</h2>
               <p><strong>File:</strong> {ledger?.fileName || '—'}</p>
-              <p><strong>File hash:</strong> {ledger?.fileHash || '—'}</p>
-              <p><strong>Extracted data hash:</strong> {dataHash || '—'}</p>
               <p>
                 <strong>Worksheet:</strong> {ledger?.sheets[sheetIndex]?.name || '—'} ·
-                header row {headerRow + 1} · data rows {dataStart + 1}–{dataEnd + 1}
+                rows {dataStart + 1}–{dataEnd + 1}
               </p>
               <p>
-                <strong>Population (active items):</strong> {activePop.length} ·{' '}
-                <strong>Coverage value:</strong> {formatMoney(coverageTotal)}
+                <strong>Population (active items):</strong> {activePop.length}
               </p>
             </section>
 
             <section>
-              <h2>4. Extent of selection</h2>
+              <h2>3. Selected sample ({selected.length} items)</h2>
               <p>
-                <strong>Items selected:</strong> {selected.length} of {activePop.length}{' '}
-                population items (confirmed sample size {sampleDesign.confirmedSize}).
+                The following {selected.length} item{selected.length === 1 ? '' : 's'}{' '}
+                {selected.length === 1 ? 'was' : 'were'} selected for testing.
               </p>
-              <p>
-                <strong>Size basis:</strong>{' '}
-                {designInputs.sampleSizePath === 'pathA'
-                  ? `Path A risk score model — ${sampleDesign.sizeRuleLabel || sizeSuggestion.ruleLabel || 'firm matrix'}`
-                  : `Path B value coverage — ${sampleDesign.sizeRuleLabel || sizeSuggestion.ruleLabel || 'coverage tier guidance'}`}
-              </p>
-              {sampleDesign.sizeRationale ? (
-                <p><strong>Auditor note on extent:</strong> {sampleDesign.sizeRationale}</p>
-              ) : null}
-            </section>
-
-            <section>
-              <h2>5. Identifying characteristics of items selected (ISA 230.9(a))</h2>
-              <p>
-                The following items were selected for testing. Identifying characteristics
-                (date, voucher / document reference, description and amounts) are recorded
-                so each item can be traced and re-performed.
-              </p>
-              <div className="preview-table-wrap">
+              <div className="preview-table-wrap wp-table">
                 <table>
                   <thead>
                     <tr>
@@ -2521,100 +2583,36 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
-              <p className="wp-note">
-                Results of detailed testing on these items, exceptions (if any), and the
-                auditor’s conclusion on the subject matter are documented on the related
-                testing working paper — not on this selection schedule.
-              </p>
             </section>
 
             <section>
-              <h2>6. Preparation and review (ISA 230.9(b)–(c))</h2>
-              <div className="form-grid grid-2 no-print-inputs">
-                <div>
-                  <label htmlFor="preparedBy">Prepared by (who performed the work)</label>
-                  <input
-                    id="preparedBy"
-                    value={signOff.preparedBy}
-                    disabled={signOff.locked}
-                    onChange={(e) =>
-                      setSignOff((prev) => ({
-                        ...prev,
-                        preparedBy: e.target.value,
-                        reviewStatus:
-                          prev.reviewStatus === 'draft' ? 'prepared' : prev.reviewStatus,
-                        preparedDate: prev.preparedDate || todayIsoDate(),
-                      }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label htmlFor="preparedDate">Date work completed</label>
-                  <input
-                    id="preparedDate"
-                    type="date"
-                    value={signOff.preparedDate}
-                    disabled={signOff.locked}
-                    onChange={(e) =>
-                      setSignOff((prev) => ({ ...prev, preparedDate: e.target.value }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label htmlFor="reviewedBy">Reviewed by</label>
-                  <input
-                    id="reviewedBy"
-                    value={signOff.reviewedBy}
-                    disabled={signOff.locked}
-                    onChange={(e) =>
-                      setSignOff((prev) => ({
-                        ...prev,
-                        reviewedBy: e.target.value,
-                        reviewStatus: e.target.value.trim()
-                          ? 'reviewed'
-                          : prev.preparedBy
-                            ? 'prepared'
-                            : 'draft',
-                        reviewedDate: prev.reviewedDate || todayIsoDate(),
-                      }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label htmlFor="reviewedDate">Date of review</label>
-                  <input
-                    id="reviewedDate"
-                    type="date"
-                    value={signOff.reviewedDate}
-                    disabled={signOff.locked}
-                    onChange={(e) =>
-                      setSignOff((prev) => ({ ...prev, reviewedDate: e.target.value }))
-                    }
-                  />
-                </div>
+              <h2>4. Preparation and review (ISA 230.9(b)–(c))</h2>
+              <div className="screen-only">
+                <p className="hint">
+                  Prepared by / Reviewed by and dates are entered at the top of this
+                  working paper. If left empty they print as blank boxes to be signed
+                  by hand.
+                </p>
+                <label htmlFor="reviewExtent">Extent of review</label>
+                <textarea
+                  id="reviewExtent"
+                  rows={2}
+                  value={signOff.reviewExtent}
+                  onChange={(e) =>
+                    setSignOff((prev) => ({ ...prev, reviewExtent: e.target.value }))
+                  }
+                />
               </div>
-              <label htmlFor="reviewExtent">Extent of review</label>
-              <textarea
-                id="reviewExtent"
-                rows={2}
-                value={signOff.reviewExtent}
-                disabled={signOff.locked}
-                onChange={(e) =>
-                  setSignOff((prev) => ({ ...prev, reviewExtent: e.target.value }))
-                }
-              />
+              <p className="print-only wp-print-extent">
+                <strong>Extent of review:</strong> {signOff.reviewExtent || '—'}
+              </p>
               <p className="wp-assembly">
                 <strong>File assembly (ISA 230):</strong> assemble the final audit file on
-                a timely basis after the date of the auditor’s report
-                {signOff.fileAssemblyDeadline
-                  ? ` (target deadline recorded: ${signOff.fileAssemblyDeadline})`
-                  : ''}
-                . Lock status:{' '}
-                {signOff.locked ? `Locked on ${signOff.lockDate || '—'}` : 'Not locked'}.
+                a timely basis after the date of the auditor’s report.
               </p>
             </section>
 
-            <footer className="wp-footer">
+            <footer className="wp-footer screen-only">
               Tool version {TOOL_VERSION}
               {configSnapshot ? ` · Config captured ${configSnapshot.capturedAt}` : ''}
             </footer>

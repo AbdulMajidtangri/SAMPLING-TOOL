@@ -15,7 +15,8 @@ Important
 This tool assists auditors in performing audit sampling.
 It does not replace professional judgment, make audit conclusions, or perform statistical sampling.
 
-Objectives
+1. **Sampling Workspace** — all auditor work in one place (upload, mapping, data quality, audit info, sample size, selection)
+2. **Working Paper** — preview, print/export, and sign-off of the selected items only (no testing conclusion or evaluation)
 
 The project aims to:
 
@@ -39,7 +40,13 @@ Common spelling correction.
 Auditor confirmation before processing.
 Flexible Ledger Support
 
-The system accepts client ledgers with:
+1. Ledger upload (worksheet + file)
+2. Headers & column mapping (confidence + required confirmation)
+3. Data quality (flags, Debit/Credit resolution, population confirm)
+4. Audit information + Path A / Path B
+5. Sample size confirmation (hard stop before item selection)
+6. Selection method (exact confirmed size)
+7. Selected items review → Preview working paper
 
 Different column orders
 Different header names

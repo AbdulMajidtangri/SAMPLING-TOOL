@@ -106,6 +106,14 @@ export function buildTransactions(params: {
     const voucherNo = readOptionalText(row, mapping.voucherNo)
     const accountNo = readOptionalText(row, mapping.accountNo)
     const description = readOptionalText(row, mapping.description)
+    const riskLevelRaw = readOptionalText(row, mapping.riskLevel)
+    let riskLevel: 'Low' | 'Medium' | 'High' = 'Low'
+    const normRisk = riskLevelRaw.trim().toLowerCase()
+    if (normRisk.includes('high')) {
+      riskLevel = 'High'
+    } else if (normRisk.includes('medium') || normRisk.includes('med')) {
+      riskLevel = 'Medium'
+    }
 
     const debitResult = readOptionalAmount(row, mapping.debit)
     const creditResult = readOptionalAmount(row, mapping.credit)
@@ -250,6 +258,7 @@ export function buildTransactions(params: {
         : '',
       highValue: false,
       stratumKey: 'all',
+      riskLevel,
       extras,
     })
   }

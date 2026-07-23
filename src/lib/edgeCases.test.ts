@@ -16,7 +16,7 @@ import {
   suggestSampleSizeForPath,
   validateSampleSizeOverride,
 } from './sampleSize'
-import { selectRandom, selectSystematic, selectBlock } from './selection'
+import { selectRandom, selectSystematic, selectBlock, runPathBSelection } from './selection'
 import type { LedgerTransaction, StandardField } from './types'
 
 function mapOf(
@@ -30,6 +30,7 @@ function mapOf(
     debit: entries.debit ?? null,
     credit: entries.credit ?? null,
     amount: entries.amount ?? null,
+    riskLevel: entries.riskLevel ?? null,
   }
 }
 
@@ -54,9 +55,10 @@ function tx(partial: Partial<LedgerTransaction> & Pick<LedgerTransaction, 'id' |
     exclusionReason: '',
     highValue: false,
     stratumKey: 'all',
+    riskLevel: 'Low',
     extras: {},
     ...partial,
-  }
+  } as LedgerTransaction
 }
 
 describe('header edge cases', () => {
@@ -251,16 +253,18 @@ describe('coverage amount rules', () => {
 })
 
 describe('sample size paths', () => {
-  it('Path A: uses risk matrix only (no coverage % mix)', () => {
+  it('Path A: base + adjustments (no coverage % mix)', () => {
     const r = pathASampleSize(
       { riskLevel: 3, expectedError: 2, otherEvidence: 2 },
       218,
     )
-    // score 7 → matrix 40; population 218 does not change matrix result
-    expect(r.score).toBe(7)
-    expect(r.matrixSize).toBe(40)
+    // base 50 (High) + 5 (Medium error) + 0 (Normal evidence) = 55
+    expect(r.baseSize).toBe(50)
+    expect(r.expectedErrorAdjustment).toBe(5)
+    expect(r.evidenceAdjustment).toBe(0)
+    expect(r.matrixSize).toBe(55)
     expect(r.coverageSize).toBeNull()
-    expect(r.finalSize).toBe(40)
+    expect(r.finalSize).toBe(55)
   })
 
   it('Path A: caps matrix size at population', () => {
@@ -268,31 +272,61 @@ describe('sample size paths', () => {
       { riskLevel: 4, expectedError: 4, otherEvidence: 4 },
       20,
     )
-    // score 12 → matrix 70, capped at 20
+    // 70 + 15 + 10 = 95 → clamped to 70 max, capped at population 20
     expect(r.matrixSize).toBe(70)
     expect(r.finalSize).toBe(20)
     expect(r.isHundredPercent).toBe(true)
   })
 
-  it('Path A: score bands match §12 matrix', () => {
+  it('Path A: sizes match the base/adjustment matrix', () => {
+    // Low 15 + 0 - 10 = 5 → floor 15
     expect(
       pathASampleSize({ riskLevel: 1, expectedError: 1, otherEvidence: 1 }, 100)
         .finalSize,
     ).toBe(15)
+    // Low 15 + 5 + 0 = 20
     expect(
-      pathASampleSize({ riskLevel: 2, expectedError: 2, otherEvidence: 1 }, 100)
+      pathASampleSize({ riskLevel: 1, expectedError: 2, otherEvidence: 2 }, 100)
         .finalSize,
-    ).toBe(25)
+    ).toBe(20)
+    // Low 15 + 10 + 5 = 30
     expect(
-      pathASampleSize({ riskLevel: 3, expectedError: 2, otherEvidence: 2 }, 100)
+      pathASampleSize({ riskLevel: 1, expectedError: 3, otherEvidence: 3 }, 100)
+        .finalSize,
+    ).toBe(30)
+    // Low 15 + 15 + 10 = 40
+    expect(
+      pathASampleSize({ riskLevel: 1, expectedError: 4, otherEvidence: 4 }, 100)
         .finalSize,
     ).toBe(40)
+    // Medium 30 + 0 - 10 = 20
     expect(
-      pathASampleSize({ riskLevel: 3, expectedError: 3, otherEvidence: 3 }, 100)
+      pathASampleSize({ riskLevel: 2, expectedError: 1, otherEvidence: 1 }, 100)
+        .finalSize,
+    ).toBe(20)
+    // Medium 30 + 15 + 10 = 55
+    expect(
+      pathASampleSize({ riskLevel: 2, expectedError: 4, otherEvidence: 4 }, 100)
+        .finalSize,
+    ).toBe(55)
+    // High 50 + 0 - 10 = 40
+    expect(
+      pathASampleSize({ riskLevel: 3, expectedError: 1, otherEvidence: 1 }, 100)
+        .finalSize,
+    ).toBe(40)
+    // High 50 + 15 + 10 = 75 → cap 70
+    expect(
+      pathASampleSize({ riskLevel: 3, expectedError: 4, otherEvidence: 4 }, 100)
+        .finalSize,
+    ).toBe(70)
+    // Very high 70 + 0 - 10 = 60
+    expect(
+      pathASampleSize({ riskLevel: 4, expectedError: 1, otherEvidence: 1 }, 100)
         .finalSize,
     ).toBe(60)
+    // Very high 70 + 5 + 0 = 75 → cap 70
     expect(
-      pathASampleSize({ riskLevel: 4, expectedError: 4, otherEvidence: 4 }, 100)
+      pathASampleSize({ riskLevel: 4, expectedError: 2, otherEvidence: 2 }, 100)
         .finalSize,
     ).toBe(70)
   })
@@ -302,22 +336,46 @@ describe('sample size paths', () => {
       { riskLevel: 3, expectedError: 2, otherEvidence: 2 },
       100,
     )
-    expect(r.finalSize).toBe(40)
+    expect(r.finalSize).toBe(55)
   })
 
-  it('Path B: value coverage suggests item count from tiers', () => {
+  it('Path B: value coverage suggests item count from 50% target', () => {
     const pop = Array.from({ length: 40 }, (_, i) =>
       tx({
         id: `R${i}`,
         rowIndex: i,
         coverageAmount: 20_000,
         debit: 20_000,
+        riskLevel: 'Low',
       }),
     )
-    // total 800_000 → tier 2 @ 60% min 500k → need 500k → 25 items of 20k
+    // total 800_000 → target 400_000 → need 20 items of 20k
     const b = pathBSizing(pop)
-    expect(b.tier).toBe(2)
-    expect(b.suggestedSampleSize).toBeGreaterThanOrEqual(15)
+    expect(b.suggestedSampleSize).toBe(20)
+    expect(b.provisionalCoverageValue).toBe(400_000)
+  })
+
+  it('Path B: single transaction rule applies when one item is >= 50%', () => {
+    const pop = [
+      tx({ id: 'R1', coverageAmount: 60_000, debit: 60_000, riskLevel: 'Low' }),
+      tx({ id: 'R2', coverageAmount: 30_000, debit: 30_000, riskLevel: 'Low' }),
+      tx({ id: 'R3', coverageAmount: 10_000, debit: 10_000, riskLevel: 'Low' }),
+    ]
+    // Total = 100k, Target = 50k. R1 (60k) >= 50k, so select ONLY R1
+    const selected = runPathBSelection(pop)
+    expect(selected.map((t) => t.id)).toEqual(['R1'])
+  })
+
+  it('Path B: sorts descending and breaks ties by Risk Level (High -> Medium -> Low)', () => {
+    const pop = [
+      tx({ id: 'R1', coverageAmount: 20_000, debit: 20_000, riskLevel: 'Low' }),
+      tx({ id: 'R2', coverageAmount: 20_000, debit: 20_000, riskLevel: 'High' }),
+      tx({ id: 'R3', coverageAmount: 20_000, debit: 20_000, riskLevel: 'Medium' }),
+    ]
+    // Total = 60k, Target = 30k. Sorted order: R2 (High), R3 (Med), R1 (Low).
+    // Target = 30k requires 2 items (R2 + R3 = 40k)
+    const selected = runPathBSelection(pop)
+    expect(selected.map((t) => t.id)).toEqual(['R2', 'R3'])
   })
 
   it('suggestSampleSizeForPath routes to Path A or B', () => {

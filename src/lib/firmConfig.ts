@@ -5,6 +5,10 @@ import {
   type RiskLevel,
 } from './types'
 
+/** Firm identity printed on the working paper masthead and shown in the app top bar. */
+export const FIRM_NAME = 'Peter & Co.'
+export const FIRM_DESCRIPTOR = 'Chartered Accountants'
+
 /** Residual / population count at or below this uses small-population coverage guidance. */
 export const SMALL_POPULATION_CUTOFF = 30
 
@@ -13,14 +17,36 @@ export const SMALL_POP_HIGH_RISK_MIN_PCT = 0.6
 export const SMALL_POP_HIGH_RISK_MAX_PCT = 0.7
 export const SMALL_POP_HIGH_RISK_DEFAULT_PCT = 0.6
 
-/** Path A — risk-score matrix (sum of risk + expected error + other evidence). */
-export const RISK_SCORE_MATRIX = [
-  { min: 3, max: 3, size: 15 },
-  { min: 4, max: 5, size: 25 },
-  { min: 6, max: 7, size: 40 },
-  { min: 8, max: 9, size: 60 },
-  { min: 10, max: 12, size: 70 },
-] as const
+/**
+ * Path A — base sample size by risk level score.
+ * 1 Low = 15, 2 Medium = 30, 3 High = 50, 4 Very high = 70.
+ */
+export const PATH_A_BASE_SIZES: Record<1 | 2 | 3 | 4, number> = {
+  1: 15,
+  2: 30,
+  3: 50,
+  4: 70,
+}
+
+/** Path A — expected error / deviation adjustment by score. */
+export const PATH_A_EXPECTED_ERROR_ADJUSTMENTS: Record<1 | 2 | 3 | 4, number> = {
+  1: 0,
+  2: 5,
+  3: 10,
+  4: 15,
+}
+
+/** Path A — other audit evidence adjustment by score (strong evidence reduces size). */
+export const PATH_A_EVIDENCE_ADJUSTMENTS: Record<1 | 2 | 3 | 4, number> = {
+  1: -10,
+  2: 0,
+  3: 5,
+  4: 10,
+}
+
+/** Path A — final size is clamped to this band after adjustments. */
+export const PATH_A_MIN_SIZE = 15
+export const PATH_A_MAX_SIZE = 70
 
 /**
  * Path B — monetary value-coverage tiers (firm guidance).
@@ -93,7 +119,11 @@ export function captureFirmConfigSnapshot(): FirmConfigSnapshot {
     smallPopHighRiskMinPct: SMALL_POP_HIGH_RISK_MIN_PCT,
     smallPopHighRiskMaxPct: SMALL_POP_HIGH_RISK_MAX_PCT,
     largePopCoverageByRisk: { ...LARGE_POP_COVERAGE_BY_RISK },
-    riskScoreMatrix: RISK_SCORE_MATRIX.map((r) => ({ ...r })),
+    pathABaseSizes: { ...PATH_A_BASE_SIZES },
+    pathAExpectedErrorAdjustments: { ...PATH_A_EXPECTED_ERROR_ADJUSTMENTS },
+    pathAEvidenceAdjustments: { ...PATH_A_EVIDENCE_ADJUSTMENTS },
+    pathAMinSize: PATH_A_MIN_SIZE,
+    pathAMaxSize: PATH_A_MAX_SIZE,
     valueCoverageTiers: VALUE_COVERAGE_TIERS.map((t) => ({
       tier: t.tier,
       maxInclusive: t.maxInclusive,

@@ -906,6 +906,19 @@ export default function ProjectionModule() {
 
   if (screen === 'workingPaper') {
     const methodLabel = method === '' ? '—' : PROJECTION_METHOD_LABELS[method]
+    /** Editable box on screen, plain text (or blank line) when printed. */
+    const wpBox = (value: string, set: (v: string) => void, placeholder: string) => (
+      <>
+        <input
+          className="screen-only wp-inline-input"
+          placeholder={placeholder}
+          value={value}
+          disabled={signOff.finalized}
+          onChange={(e) => set(e.target.value)}
+        />
+        <span className="print-only">{value || '\u00A0'}</span>
+      </>
+    )
     return (
       <div className="wp-screen">
         <div className="wp-toolbar no-print">
@@ -949,21 +962,21 @@ export default function ProjectionModule() {
               <tbody>
                 <tr>
                   <th scope="row">Client</th>
-                  <td>{eng.clientName || '—'}</td>
+                  <td>{wpBox(eng.clientName, (v) => setEng((p) => ({ ...p, clientName: v })), 'Client name')}</td>
                   <th scope="row">Audit period</th>
-                  <td>{eng.auditPeriod || '—'}</td>
+                  <td>{wpBox(eng.auditPeriod, (v) => setEng((p) => ({ ...p, auditPeriod: v })), 'e.g. 1 Jan – 31 Dec 2025')}</td>
                 </tr>
                 <tr>
                   <th scope="row">Account / population</th>
-                  <td>{eng.accountTested || '—'}</td>
+                  <td>{wpBox(eng.accountTested, (v) => setEng((p) => ({ ...p, accountTested: v })), 'Account or population tested')}</td>
                   <th scope="row">FS line item</th>
-                  <td>{eng.fsLineItem || '—'}</td>
+                  <td>{wpBox(eng.fsLineItem, (v) => setEng((p) => ({ ...p, fsLineItem: v })), 'FS line item affected')}</td>
                 </tr>
                 <tr>
                   <th scope="row">WP reference</th>
-                  <td>{eng.wpReference || '—'}</td>
+                  <td>{wpBox(eng.wpReference, (v) => setEng((p) => ({ ...p, wpReference: v })), 'WP reference')}</td>
                   <th scope="row">Stratum reference</th>
-                  <td>{eng.stratumRef || '—'}</td>
+                  <td>{wpBox(eng.stratumRef, (v) => setEng((p) => ({ ...p, stratumRef: v })), 'Optional')}</td>
                 </tr>
                 <tr>
                   <th scope="row">Test type</th>
@@ -975,7 +988,7 @@ export default function ProjectionModule() {
                 </tr>
                 <tr>
                   <th scope="row">Sampling unit</th>
-                  <td>{eng.samplingUnit || '—'}</td>
+                  <td>{wpBox(eng.samplingUnit, (v) => setEng((p) => ({ ...p, samplingUnit: v })), 'e.g. individual invoice')}</td>
                   <th scope="row">Currency</th>
                   <td>{eng.currency}</td>
                 </tr>
@@ -992,16 +1005,43 @@ export default function ProjectionModule() {
 
           <section>
             <h2>1. Population and completeness</h2>
-            <p><strong>Population source:</strong> {eng.populationSource || '—'}</p>
             <p>
-              <strong>Reconciled to:</strong> {recon.reconciledTo || '—'} · listing{' '}
-              {fmtNum(recon.valuePerListing)} vs GL/FS {fmtNum(recon.valuePerGL)} ·
-              difference {fmtNum(reconDifference)}
+              <strong>Population source:</strong>{' '}
+              {wpBox(
+                eng.populationSource,
+                (v) => setEng((p) => ({ ...p, populationSource: v })),
+                'e.g. sales ledger detail report dated 31 December 2025',
+              )}
+            </p>
+            <p>
+              <strong>Reconciled to:</strong>{' '}
+              {wpBox(
+                recon.reconciledTo,
+                (v) => setRecon((p) => ({ ...p, reconciledTo: v })),
+                'GL account or FS line',
+              )}
+            </p>
+            <p>
+              <strong>Reconciliation:</strong> listing {fmtNum(recon.valuePerListing)} vs
+              GL/FS {fmtNum(recon.valuePerGL)} · difference {fmtNum(reconDifference)}
               {reconDifference !== 0 ? ` — ${recon.explanation}` : ''}
             </p>
             <p>
-              <strong>Completeness verified by:</strong> {recon.verifiedBy || '—'}{' '}
-              {recon.verifiedDate}
+              <strong>Completeness verified by:</strong>{' '}
+              {wpBox(
+                recon.verifiedBy,
+                (v) => setRecon((p) => ({ ...p, verifiedBy: v })),
+                'Name',
+              )}{' '}
+              <input
+                className="screen-only wp-inline-input wp-inline-date"
+                type="date"
+                aria-label="Date verified"
+                value={recon.verifiedDate}
+                disabled={signOff.finalized}
+                onChange={(e) => setRecon((p) => ({ ...p, verifiedDate: e.target.value }))}
+              />
+              <span className="print-only">{recon.verifiedDate || '\u00A0'}</span>
             </p>
             <div className="preview-table-wrap wp-table">
               <table>
@@ -1161,7 +1201,11 @@ export default function ProjectionModule() {
             <p>
               <strong>Sample:</strong> {sample.itemCount} items
               {isDetails ? ` · recorded value ${fmtNum(sample.recordedValue)}` : ''} · period{' '}
-              {sample.periodCovered || '—'}
+              {wpBox(
+                sample.periodCovered,
+                (v) => setSample((p) => ({ ...p, periodCovered: v })),
+                'Date range covered by the sample',
+              )}
             </p>
             {isDetails && residualValue > 0 && (
               <p>

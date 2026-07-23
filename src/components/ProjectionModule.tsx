@@ -184,6 +184,18 @@ const BUCKET_LABELS: Record<RegisterBucket, string> = {
   specific: 'Specifically selected',
 }
 
+/** Quick navigation chips for the long input screen. */
+const PROJ_NAV: Array<[string, string]> = [
+  ['blockA', 'A · Setup'],
+  ['blockB', 'B · Population'],
+  ['blockC', 'C · Planning'],
+  ['blockD', 'D · Sample'],
+  ['blockE', 'E–F · Register'],
+  ['blockG', 'G · Qualitative'],
+  ['blockH', 'H · Method'],
+  ['validation', 'Warnings & WP'],
+]
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -429,27 +441,11 @@ export default function ProjectionModule() {
   const hardBlocks: string[] = useMemo(() => {
     const blocks: string[] = []
 
-    // 1. Mandatory fields, Blocks A to H
+    // 1. Mandatory fields, Blocks A to H. Identification text, descriptions and
+    // narrative are written on the working paper and gate finalisation instead.
     const missing: string[] = []
-    if (!eng.clientName.trim()) missing.push('Client name')
-    if (!eng.auditPeriod.trim()) missing.push('Audit period')
-    if (!eng.wpReference.trim()) missing.push('Working paper reference')
-    if (!eng.accountTested.trim()) missing.push('Account or population tested')
-    if (!eng.fsLineItem.trim()) missing.push('Financial statement line item')
-    if (!eng.populationSource.trim()) missing.push('Population source description')
-    if (!eng.samplingUnit.trim()) missing.push('Sampling unit')
-    if (!recon.reconciledTo.trim()) missing.push('Population reconciled to')
-    if (!recon.verifiedBy.trim()) missing.push('Completeness verified by')
-    if (isDetails) {
-      if (!plan.tolerableMisstatementBasis.trim()) missing.push('Basis for tolerable misstatement')
-      if (plan.offsettingAppropriate === '') missing.push('Offsetting appropriate (yes/no)')
-      if (plan.offsettingAppropriate === 'no' && !plan.offsettingReason.trim())
-        missing.push('Offsetting reason')
-    } else {
-      if (!plan.tolerableDeviationRateBasis.trim()) missing.push('Basis for tolerable rate of deviation')
-    }
-    if (!plan.sampleSizeRationale.trim()) missing.push('Sample size rationale')
-    if (!sample.periodCovered.trim()) missing.push('Period covered by the sample')
+    if (isDetails && plan.offsettingAppropriate === '')
+      missing.push('Offsetting appropriate (yes/no)')
     if (missing.length) blocks.push(`Mandatory fields incomplete: ${missing.join(', ')}.`)
 
     // 2–3. Sample counts
@@ -554,9 +550,6 @@ export default function ProjectionModule() {
   // Blocks A–F gate for the method selector (Screen 1 rule)
   const methodSelectorLocked = useMemo(() => {
     return (
-      !eng.clientName.trim() ||
-      !eng.wpReference.trim() ||
-      !eng.accountTested.trim() ||
       comp.totalValue <= 0 ||
       comp.totalCount <= 0 ||
       residualValue < 0 ||
@@ -569,7 +562,7 @@ export default function ProjectionModule() {
       quality.noZeroValueItems.answer === '' ||
       quality.homogeneous.answer === ''
     )
-  }, [eng, comp, residualValue, residualCount, sample.itemCount, isDetails, plan, quality])
+  }, [comp, residualValue, residualCount, sample.itemCount, isDetails, plan, quality])
 
   // -------------------------------------------------------------------------
   // Soft warnings (14.2), each with a stable id so a response can be recorded
@@ -790,8 +783,25 @@ export default function ProjectionModule() {
 
   const missingNarrative: string[] = useMemo(() => {
     const gaps: string[] = []
+    if (!eng.clientName.trim()) gaps.push('Client name')
+    if (!eng.auditPeriod.trim()) gaps.push('Audit period')
+    if (!eng.wpReference.trim()) gaps.push('Working paper reference')
+    if (!eng.accountTested.trim()) gaps.push('Account or population tested')
+    if (!eng.fsLineItem.trim()) gaps.push('Financial statement line item')
+    if (!eng.samplingUnit.trim()) gaps.push('Sampling unit')
+    if (!eng.populationSource.trim()) gaps.push('Population source description')
+    if (!recon.reconciledTo.trim()) gaps.push('Population reconciled to')
+    if (!recon.verifiedBy.trim()) gaps.push('Completeness verified by')
+    if (!sample.periodCovered.trim()) gaps.push('Period covered by the sample')
     if (method !== '' && !signOff.methodSelectionReason.trim())
       gaps.push('Reason for method selection')
+    if (isDetails && !plan.tolerableMisstatementBasis.trim())
+      gaps.push('Basis for tolerable misstatement')
+    if (!isDetails && !plan.tolerableDeviationRateBasis.trim())
+      gaps.push('Basis for tolerable rate of deviation')
+    if (!plan.sampleSizeRationale.trim()) gaps.push('Sample size rationale')
+    if (isDetails && plan.offsettingAppropriate === 'no' && !plan.offsettingReason.trim())
+      gaps.push('Offsetting reason')
     if (
       (agg.sampleMisstatementCount > 0 || sampleDeviations > 0) &&
       !qual.natureAndCause.trim()
@@ -808,7 +818,7 @@ export default function ProjectionModule() {
     if (!signOff.preparedBy.trim()) gaps.push('Preparer signature')
     if (!signOff.reviewedBy.trim()) gaps.push('Reviewer signature')
     return gaps
-  }, [method, signOff, agg.sampleMisstatementCount, sampleDeviations, qual.natureAndCause, qual.escalationResponse, fraudPresent, warnings, warningResponses, hardTriggers.length])
+  }, [eng, recon.reconciledTo, recon.verifiedBy, sample.periodCovered, method, signOff, isDetails, plan.tolerableMisstatementBasis, plan.tolerableDeviationRateBasis, plan.sampleSizeRationale, plan.offsettingAppropriate, plan.offsettingReason, agg.sampleMisstatementCount, sampleDeviations, qual.natureAndCause, qual.escalationResponse, fraudPresent, warnings, warningResponses, hardTriggers.length])
 
   // -------------------------------------------------------------------------
   // Anomaly editor
@@ -1065,15 +1075,42 @@ export default function ProjectionModule() {
                   <strong>Performance materiality:</strong> {fmtNum(plan.performanceMateriality)} ·{' '}
                   <strong>Tolerable misstatement:</strong> {fmtNum(plan.tolerableMisstatement)}
                 </p>
-                <p><strong>Basis:</strong> {plan.tolerableMisstatementBasis || '—'}</p>
+                <div className="screen-only">
+                  <label>Basis for tolerable misstatement (completed by the auditor)</label>
+                  <textarea
+                    rows={2}
+                    value={plan.tolerableMisstatementBasis}
+                    disabled={signOff.finalized}
+                    onChange={(e) =>
+                      setPlan((p) => ({ ...p, tolerableMisstatementBasis: e.target.value }))
+                    }
+                  />
+                </div>
+                <p className="print-only"><strong>Basis:</strong> {plan.tolerableMisstatementBasis || '—'}</p>
                 <p>
                   <strong>Expected misstatement used in sizing:</strong>{' '}
                   {fmtNum(plan.expectedMisstatement)}
                 </p>
                 <p>
                   <strong>Offsetting appropriate:</strong> {plan.offsettingAppropriate || '—'}
-                  {plan.offsettingReason ? ` — ${plan.offsettingReason}` : ''}
                 </p>
+                {plan.offsettingAppropriate !== '' && (
+                  <>
+                    <div className="screen-only">
+                      <label>Reason for the offsetting decision (completed by the auditor)</label>
+                      <input
+                        value={plan.offsettingReason}
+                        disabled={signOff.finalized}
+                        onChange={(e) =>
+                          setPlan((p) => ({ ...p, offsettingReason: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <p className="print-only">
+                      <strong>Reason (offsetting):</strong> {plan.offsettingReason || '—'}
+                    </p>
+                  </>
+                )}
               </>
             ) : (
               <>
@@ -1082,12 +1119,36 @@ export default function ProjectionModule() {
                   {plan.tolerableDeviationRatePct.toFixed(2)}% ·{' '}
                   <strong>Expected rate:</strong> {plan.expectedDeviationRatePct.toFixed(2)}%
                 </p>
-                <p><strong>Basis:</strong> {plan.tolerableDeviationRateBasis || '—'}</p>
+                <div className="screen-only">
+                  <label>Basis for tolerable rate of deviation (completed by the auditor)</label>
+                  <textarea
+                    rows={2}
+                    value={plan.tolerableDeviationRateBasis}
+                    disabled={signOff.finalized}
+                    onChange={(e) =>
+                      setPlan((p) => ({ ...p, tolerableDeviationRateBasis: e.target.value }))
+                    }
+                  />
+                </div>
+                <p className="print-only"><strong>Basis:</strong> {plan.tolerableDeviationRateBasis || '—'}</p>
               </>
             )}
             <p>
-              <strong>Basis for sample size:</strong> {plan.sampleSizeBasis} —{' '}
-              {plan.sampleSizeRationale || '—'}
+              <strong>Basis for sample size:</strong> {plan.sampleSizeBasis}
+            </p>
+            <div className="screen-only">
+              <label>Sample size rationale (completed by the auditor)</label>
+              <textarea
+                rows={2}
+                value={plan.sampleSizeRationale}
+                disabled={signOff.finalized}
+                onChange={(e) =>
+                  setPlan((p) => ({ ...p, sampleSizeRationale: e.target.value }))
+                }
+              />
+            </div>
+            <p className="print-only">
+              <strong>Sample size rationale:</strong> {plan.sampleSizeRationale || '—'}
             </p>
             <p>
               <strong>Selection method:</strong>{' '}
@@ -1550,42 +1611,50 @@ export default function ProjectionModule() {
   return (
     <div className="workspace-layout proj-layout">
       <main className="workspace-main proj-main">
+        {/* Block navigator */}
+        <nav className="proj-block-nav no-print" aria-label="Projection blocks">
+          {PROJ_NAV.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() =>
+                document
+                  .getElementById(`proj-${id}`)
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
         {/* Block A */}
-        <section className="ws-card is-active">
+        <section className="ws-card is-active" id="proj-blockA">
           <div className="ws-card-head">
             <div>
               <p className="section-kicker">Block A</p>
-              <h2>Engagement and population identification</h2>
+              <h2>Test setup and population reconciliation</h2>
               <p className="section-lead">
-                Standalone module: every input is entered by the auditor after testing is
-                complete. The projection method unlocks when Blocks A to F are complete.
+                Only the choices that drive the calculations are made here. Client name,
+                period, references and descriptions are written directly on the working
+                paper.
               </p>
             </div>
           </div>
-          <div className="form-grid grid-3">
+          <div className="form-grid grid-2">
             <div>
-              <label>Client name</label>
-              <input value={eng.clientName} onChange={(e) => setEng((p) => ({ ...p, clientName: e.target.value }))} />
-            </div>
-            <div>
-              <label>Audit period</label>
-              <input placeholder="e.g. 1 Jan – 31 Dec 2025" value={eng.auditPeriod} onChange={(e) => setEng((p) => ({ ...p, auditPeriod: e.target.value }))} />
-            </div>
-            <div>
-              <label>Working paper reference</label>
-              <input value={eng.wpReference} onChange={(e) => setEng((p) => ({ ...p, wpReference: e.target.value }))} />
-            </div>
-            <div>
-              <label>Account or population tested</label>
-              <input value={eng.accountTested} onChange={(e) => setEng((p) => ({ ...p, accountTested: e.target.value }))} />
-            </div>
-            <div>
-              <label>Financial statement line item</label>
-              <input value={eng.fsLineItem} onChange={(e) => setEng((p) => ({ ...p, fsLineItem: e.target.value }))} />
-            </div>
-            <div>
-              <label>Sampling unit</label>
-              <input placeholder="e.g. individual invoice" value={eng.samplingUnit} onChange={(e) => setEng((p) => ({ ...p, samplingUnit: e.target.value }))} />
+              <label>Test type</label>
+              <select
+                value={eng.testType}
+                onChange={(e) => {
+                  const tt = e.target.value as ProjTestType
+                  setEng((p) => ({ ...p, testType: tt }))
+                  setMethod(tt === 'controls' ? 'deviationRate' : '')
+                }}
+              >
+                <option value="details">Test of details</option>
+                <option value="controls">Test of controls</option>
+              </select>
             </div>
             <div>
               <label>Assertion tested</label>
@@ -1604,24 +1673,6 @@ export default function ProjectionModule() {
               </select>
             </div>
             <div>
-              <label>Test type</label>
-              <select
-                value={eng.testType}
-                onChange={(e) => {
-                  const tt = e.target.value as ProjTestType
-                  setEng((p) => ({ ...p, testType: tt }))
-                  setMethod(tt === 'controls' ? 'deviationRate' : '')
-                }}
-              >
-                <option value="details">Test of details</option>
-                <option value="controls">Test of controls</option>
-              </select>
-            </div>
-            <div>
-              <label>Stratum reference (optional)</label>
-              <input value={eng.stratumRef} onChange={(e) => setEng((p) => ({ ...p, stratumRef: e.target.value }))} />
-            </div>
-            <div>
               <label>Reporting currency</label>
               <select value={eng.currency} onChange={(e) => setEng((p) => ({ ...p, currency: e.target.value }))}>
                 {PROJ_CURRENCIES.map((c) => (
@@ -1630,19 +1681,9 @@ export default function ProjectionModule() {
               </select>
             </div>
           </div>
-          <label>Population source description</label>
-          <input
-            placeholder="e.g. sales ledger detail report dated 31 December 2025"
-            value={eng.populationSource}
-            onChange={(e) => setEng((p) => ({ ...p, populationSource: e.target.value }))}
-          />
 
           <h3>Population completeness and reconciliation (4.1)</h3>
           <div className="form-grid grid-3">
-            <div>
-              <label>Population reconciled to</label>
-              <input value={recon.reconciledTo} onChange={(e) => setRecon((p) => ({ ...p, reconciledTo: e.target.value }))} />
-            </div>
             <div>
               <label>Value per population listing</label>
               <NumberTextInput integer={false} value={recon.valuePerListing} onValueChange={(v) => setRecon((p) => ({ ...p, valuePerListing: v }))} />
@@ -1655,14 +1696,6 @@ export default function ProjectionModule() {
               <label>Reconciling difference (auto)</label>
               <input value={fmtNum(reconDifference)} readOnly disabled />
             </div>
-            <div>
-              <label>Completeness verified by</label>
-              <input value={recon.verifiedBy} onChange={(e) => setRecon((p) => ({ ...p, verifiedBy: e.target.value }))} />
-            </div>
-            <div>
-              <label>Date verified</label>
-              <input type="date" value={recon.verifiedDate} onChange={(e) => setRecon((p) => ({ ...p, verifiedDate: e.target.value }))} />
-            </div>
           </div>
           {reconDifference !== 0 && (
             <>
@@ -1670,10 +1703,14 @@ export default function ProjectionModule() {
               <textarea rows={2} value={recon.explanation} onChange={(e) => setRecon((p) => ({ ...p, explanation: e.target.value }))} />
             </>
           )}
+          <p className="hint">
+            "Reconciled to", "verified by" and the population source description are written
+            on the working paper.
+          </p>
         </section>
 
         {/* Block B */}
-        <section className="ws-card is-active">
+        <section className="ws-card is-active" id="proj-blockB">
           <div className="ws-card-head">
             <div>
               <p className="section-kicker">Block B</p>
@@ -1762,7 +1799,7 @@ export default function ProjectionModule() {
         </section>
 
         {/* Block C */}
-        <section className="ws-card is-active">
+        <section className="ws-card is-active" id="proj-blockC">
           <div className="ws-card-head">
             <div>
               <p className="section-kicker">Block C</p>
@@ -1834,18 +1871,6 @@ export default function ProjectionModule() {
             </div>
           )}
 
-          {isDetails ? (
-            <>
-              <label>Basis for tolerable misstatement</label>
-              <textarea rows={2} value={plan.tolerableMisstatementBasis} onChange={(e) => setPlan((p) => ({ ...p, tolerableMisstatementBasis: e.target.value }))} />
-            </>
-          ) : (
-            <>
-              <label>Basis for tolerable rate of deviation</label>
-              <textarea rows={2} value={plan.tolerableDeviationRateBasis} onChange={(e) => setPlan((p) => ({ ...p, tolerableDeviationRateBasis: e.target.value }))} />
-            </>
-          )}
-
           <div className="form-grid grid-2">
             <div>
               <label>Basis for sample size</label>
@@ -1866,21 +1891,17 @@ export default function ProjectionModule() {
               </div>
             )}
           </div>
-          {isDetails && plan.offsettingAppropriate !== '' && (
-            <>
-              <label>Reason (offsetting)</label>
-              <input value={plan.offsettingReason} onChange={(e) => setPlan((p) => ({ ...p, offsettingReason: e.target.value }))} />
-            </>
-          )}
-          <label>Sample size rationale</label>
-          <textarea rows={2} value={plan.sampleSizeRationale} onChange={(e) => setPlan((p) => ({ ...p, sampleSizeRationale: e.target.value }))} />
+          <p className="hint">
+            The written narrative — basis for the tolerable limit, sample size rationale and
+            the offsetting reason — is completed directly on the working paper.
+          </p>
           {isDetails && plan.performanceMateriality > 0 && plan.tolerableMisstatement > plan.performanceMateriality && (
             <div className="banner error">Tolerable misstatement may not exceed performance materiality.</div>
           )}
         </section>
 
         {/* Block D */}
-        <section className="ws-card is-active">
+        <section className="ws-card is-active" id="proj-blockD">
           <div className="ws-card-head">
             <div>
               <p className="section-kicker">Block D</p>
@@ -1904,11 +1925,10 @@ export default function ProjectionModule() {
                 <NumberTextInput integer={false} value={sample.auditedValueTotal} onValueChange={(v) => setSample((p) => ({ ...p, auditedValueTotal: v }))} />
               </div>
             )}
-            <div>
-              <label>Date range / period covered by the sample</label>
-              <input value={sample.periodCovered} onChange={(e) => setSample((p) => ({ ...p, periodCovered: e.target.value }))} />
-            </div>
           </div>
+          <p className="hint">
+            The date range covered by the sample is written on the working paper.
+          </p>
           <label className="check-row">
             <input type="checkbox" checked={sample.drawnFromResidualConfirmed} onChange={(e) => setSample((p) => ({ ...p, drawnFromResidualConfirmed: e.target.checked }))} />
             <span>I confirm the sample was drawn only from the residual population.</span>
@@ -1920,7 +1940,7 @@ export default function ProjectionModule() {
         </section>
 
         {/* Block E */}
-        <section className="ws-card is-active">
+        <section className="ws-card is-active" id="proj-blockE">
           <div className="ws-card-head">
             <div>
               <p className="section-kicker">Blocks E–F</p>
@@ -2091,7 +2111,7 @@ export default function ProjectionModule() {
         </section>
 
         {/* Block G */}
-        <section className="ws-card is-active">
+        <section className="ws-card is-active" id="proj-blockG">
           <div className="ws-card-head">
             <div>
               <p className="section-kicker">Block G</p>
@@ -2118,7 +2138,7 @@ export default function ProjectionModule() {
         </section>
 
         {/* Block H */}
-        <section className="ws-card is-active">
+        <section className="ws-card is-active" id="proj-blockH">
           <div className="ws-card-head">
             <div>
               <p className="section-kicker">Block H</p>
@@ -2219,7 +2239,7 @@ export default function ProjectionModule() {
         </section>
 
         {/* Warnings + generate */}
-        <section className="ws-card is-active">
+        <section className="ws-card is-active" id="proj-validation">
           <div className="ws-card-head">
             <div>
               <p className="section-kicker">Validation</p>

@@ -523,11 +523,8 @@ export default function ProjectionModule() {
       }
     }
 
-    // 14. Fraud escalation
-    if (fraudPresent && !qual.escalationResponse.trim())
-      blocks.push(
-        'Suspected fraud identified: the "Escalation and ISA 240 response" field must be completed before the working paper can be finalised.',
-      )
+    // 14. Fraud escalation is completed on the working paper itself and blocks
+    // finalisation there (Section 10.1), not working paper generation.
 
     // 16. Same basis / currency
     if (!sample.sameBasisConfirmed)
@@ -552,8 +549,6 @@ export default function ProjectionModule() {
     method,
     availability,
     mpuGateFailures,
-    fraudPresent,
-    qual.escalationResponse,
   ])
 
   // Blocks A–F gate for the method selector (Screen 1 rule)
@@ -807,11 +802,13 @@ export default function ProjectionModule() {
     }
     if (hardTriggers.length > 0 && signOff.plannedResponses.length === 0)
       gaps.push('Planned audit response (at least one required — a hard trigger has fired)')
+    if (fraudPresent && !qual.escalationResponse.trim())
+      gaps.push('Escalation and ISA 240 response (suspected fraud identified)')
     if (!signOff.finalConclusion.trim()) gaps.push('Final conclusion')
     if (!signOff.preparedBy.trim()) gaps.push('Preparer signature')
     if (!signOff.reviewedBy.trim()) gaps.push('Reviewer signature')
     return gaps
-  }, [method, signOff, agg.sampleMisstatementCount, sampleDeviations, qual.natureAndCause, warnings, warningResponses, hardTriggers.length])
+  }, [method, signOff, agg.sampleMisstatementCount, sampleDeviations, qual.natureAndCause, qual.escalationResponse, fraudPresent, warnings, warningResponses, hardTriggers.length])
 
   // -------------------------------------------------------------------------
   // Anomaly editor
@@ -1218,7 +1215,18 @@ export default function ProjectionModule() {
           <section>
             <h2>4. Projection</h2>
             <p><strong>Method:</strong> {methodLabel}</p>
-            <p className="hint">
+            <div className="screen-only">
+              <label>Reason for method selection (completed by the auditor)</label>
+              <textarea
+                rows={2}
+                value={signOff.methodSelectionReason}
+                disabled={signOff.finalized}
+                onChange={(e) =>
+                  setSignOff((p) => ({ ...p, methodSelectionReason: e.target.value }))
+                }
+              />
+            </div>
+            <p className="print-only">
               <strong>Reason for method selection:</strong> {signOff.methodSelectionReason || '—'}
             </p>
             {isDetails && method === 'ratio' && (
@@ -1334,8 +1342,21 @@ export default function ProjectionModule() {
                   {warnings.map((w) => (
                     <li key={`wp-w-${w.id}`}>
                       {w.text}
-                      <br />
-                      <em>Response: {warningResponses[w.id] || '—'}</em>
+                      <div className="screen-only">
+                        <input
+                          className="wp-inline-input"
+                          placeholder="Auditor response (required before the working paper can be marked Final)"
+                          value={warningResponses[w.id] ?? ''}
+                          disabled={signOff.finalized}
+                          onChange={(e) =>
+                            setWarningResponses((prev) => ({
+                              ...prev,
+                              [w.id]: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <em className="print-only">Response: {warningResponses[w.id] || '—'}</em>
                     </li>
                   ))}
                 </ul>
@@ -1343,8 +1364,28 @@ export default function ProjectionModule() {
             )}
             {hardTriggers.length > 0 && (
               <>
-                <h3>Planned audit response</h3>
-                <ul>
+                <h3>Planned audit response (15.3) — at least one required</h3>
+                <div className="screen-only">
+                  {PLANNED_RESPONSE_OPTIONS.map((opt) => (
+                    <label className="check-row" key={opt}>
+                      <input
+                        type="checkbox"
+                        checked={signOff.plannedResponses.includes(opt)}
+                        disabled={signOff.finalized}
+                        onChange={(e) =>
+                          setSignOff((p) => ({
+                            ...p,
+                            plannedResponses: e.target.checked
+                              ? [...p.plannedResponses, opt]
+                              : p.plannedResponses.filter((r) => r !== opt),
+                          }))
+                        }
+                      />
+                      <span>{opt}</span>
+                    </label>
+                  ))}
+                </div>
+                <ul className="print-only">
                   {signOff.plannedResponses.length === 0 ? (
                     <li>—</li>
                   ) : (
@@ -1357,14 +1398,67 @@ export default function ProjectionModule() {
 
           <section>
             <h2>6. Qualitative evaluation</h2>
-            <p><strong>Nature and cause:</strong> {qual.natureAndCause || '—'}</p>
-            <p><strong>Systematic or isolated:</strong> {qual.systematicOrIsolated || '—'}</p>
-            <p><strong>Effect on other audit areas:</strong> {qual.effectOnOtherAreas || '—'}</p>
-            <p><strong>Effect on assessed risk:</strong> {qual.effectOnRisk || '—'}</p>
-            <p><strong>Control deficiency:</strong> {qual.controlDeficiency || '—'}</p>
-            {fraudPresent && (
-              <p><strong>Escalation and ISA 240 response:</strong> {qual.escalationResponse || '—'}</p>
-            )}
+            <div className="screen-only">
+              <label>Nature and cause of the misstatements or deviations</label>
+              <textarea
+                rows={2}
+                value={qual.natureAndCause}
+                disabled={signOff.finalized}
+                onChange={(e) => setQual((p) => ({ ...p, natureAndCause: e.target.value }))}
+              />
+              <label>Systematic or isolated, with reasoning</label>
+              <textarea
+                rows={2}
+                value={qual.systematicOrIsolated}
+                disabled={signOff.finalized}
+                onChange={(e) => setQual((p) => ({ ...p, systematicOrIsolated: e.target.value }))}
+              />
+              <div className="form-grid grid-2">
+                <div>
+                  <label>Effect on other audit areas</label>
+                  <input
+                    value={qual.effectOnOtherAreas}
+                    disabled={signOff.finalized}
+                    onChange={(e) => setQual((p) => ({ ...p, effectOnOtherAreas: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label>Effect on the assessed risk of material misstatement</label>
+                  <input
+                    value={qual.effectOnRisk}
+                    disabled={signOff.finalized}
+                    onChange={(e) => setQual((p) => ({ ...p, effectOnRisk: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <label>Control deficiency indicated (and severity)</label>
+              <input
+                value={qual.controlDeficiency}
+                disabled={signOff.finalized}
+                onChange={(e) => setQual((p) => ({ ...p, controlDeficiency: e.target.value }))}
+              />
+              {fraudPresent && (
+                <>
+                  <label>Escalation and ISA 240 response (mandatory — suspected fraud)</label>
+                  <textarea
+                    rows={2}
+                    value={qual.escalationResponse}
+                    disabled={signOff.finalized}
+                    onChange={(e) => setQual((p) => ({ ...p, escalationResponse: e.target.value }))}
+                  />
+                </>
+              )}
+            </div>
+            <div className="print-only">
+              <p><strong>Nature and cause:</strong> {qual.natureAndCause || '—'}</p>
+              <p><strong>Systematic or isolated:</strong> {qual.systematicOrIsolated || '—'}</p>
+              <p><strong>Effect on other audit areas:</strong> {qual.effectOnOtherAreas || '—'}</p>
+              <p><strong>Effect on assessed risk:</strong> {qual.effectOnRisk || '—'}</p>
+              <p><strong>Control deficiency:</strong> {qual.controlDeficiency || '—'}</p>
+              {fraudPresent && (
+                <p><strong>Escalation and ISA 240 response:</strong> {qual.escalationResponse || '—'}</p>
+              )}
+            </div>
           </section>
 
           <section>
@@ -2002,39 +2096,24 @@ export default function ProjectionModule() {
             <div>
               <p className="section-kicker">Block G</p>
               <h2>Qualitative evaluation</h2>
+              <p className="section-lead">
+                The qualitative narrative (nature and cause, systematic or isolated, effects,
+                control deficiency) is written directly on the working paper. Only the fraud
+                indicator is recorded here because it gates the calculations.
+              </p>
             </div>
           </div>
-          <label>Nature and cause of the misstatements or deviations</label>
-          <textarea rows={2} value={qual.natureAndCause} onChange={(e) => setQual((p) => ({ ...p, natureAndCause: e.target.value }))} />
-          <label>Systematic or isolated, with reasoning</label>
-          <textarea rows={2} value={qual.systematicOrIsolated} onChange={(e) => setQual((p) => ({ ...p, systematicOrIsolated: e.target.value }))} />
-          <div className="form-grid grid-2">
-            <div>
-              <label>Effect on other audit areas</label>
-              <input value={qual.effectOnOtherAreas} onChange={(e) => setQual((p) => ({ ...p, effectOnOtherAreas: e.target.value }))} />
-            </div>
-            <div>
-              <label>Effect on the assessed risk of material misstatement</label>
-              <input value={qual.effectOnRisk} onChange={(e) => setQual((p) => ({ ...p, effectOnRisk: e.target.value }))} />
-            </div>
-          </div>
-          <label>Control deficiency indicated (and severity)</label>
-          <input value={qual.controlDeficiency} onChange={(e) => setQual((p) => ({ ...p, controlDeficiency: e.target.value }))} />
           <label className="check-row">
             <input type="checkbox" checked={qual.fraudIndicator} onChange={(e) => setQual((p) => ({ ...p, fraudIndicator: e.target.checked }))} />
             <span>Fraud indicator at population level</span>
           </label>
           {fraudPresent && (
-            <>
-              <div className="banner error">
-                Suspected fraud identified. Refer to the engagement fraud risk assessment and
-                communication requirements under ISA 240. Finalisation is blocked until the
-                escalation response is completed; no related item may be classified as an
-                anomaly.
-              </div>
-              <label>Escalation and ISA 240 response (mandatory)</label>
-              <textarea rows={2} value={qual.escalationResponse} onChange={(e) => setQual((p) => ({ ...p, escalationResponse: e.target.value }))} />
-            </>
+            <div className="banner error">
+              Suspected fraud identified. Refer to the engagement fraud risk assessment and
+              communication requirements under ISA 240. No related item may be classified as
+              an anomaly, and the working paper cannot be finalised until the escalation
+              response is completed on the working paper.
+            </div>
           )}
         </section>
 
@@ -2074,8 +2153,9 @@ export default function ProjectionModule() {
                   {!PROJ_CONFIG.meanPerUnitEnabled ? ' (disabled at firm level)' : ''}
                 </option>
               </select>
-              <label>Reason for method selection (printed on the working paper)</label>
-              <textarea rows={2} value={signOff.methodSelectionReason} onChange={(e) => setSignOff((p) => ({ ...p, methodSelectionReason: e.target.value }))} />
+              <p className="hint">
+                The reason for the method selection is written directly on the working paper.
+              </p>
 
               {method === 'meanPerUnit' && mpuGateFailures.length > 0 && (
                 <div className="banner error">
@@ -2131,26 +2211,10 @@ export default function ProjectionModule() {
           ))}
 
           {hardTriggers.length > 0 && (
-            <>
-              <h3>Planned audit response (15.3) — at least one required</h3>
-              {PLANNED_RESPONSE_OPTIONS.map((opt) => (
-                <label className="check-row" key={opt}>
-                  <input
-                    type="checkbox"
-                    checked={signOff.plannedResponses.includes(opt)}
-                    onChange={(e) =>
-                      setSignOff((p) => ({
-                        ...p,
-                        plannedResponses: e.target.checked
-                          ? [...p.plannedResponses, opt]
-                          : p.plannedResponses.filter((r) => r !== opt),
-                      }))
-                    }
-                  />
-                  <span>{opt}</span>
-                </label>
-              ))}
-            </>
+            <p className="hint">
+              A hard trigger has fired. Select the planned audit response (15.3) on the
+              working paper — at least one is required before it can be marked Final.
+            </p>
           )}
         </section>
 
@@ -2161,8 +2225,8 @@ export default function ProjectionModule() {
               <p className="section-kicker">Validation</p>
               <h2>Warnings and working paper</h2>
               <p className="section-lead">
-                Every warning is printed on the working paper with your response. A warning
-                cannot be dismissed silently (14.2).
+                Every warning is printed on the working paper, where you record your response
+                to each. A warning cannot be dismissed silently (14.2).
               </p>
             </div>
           </div>
@@ -2179,13 +2243,6 @@ export default function ProjectionModule() {
           {warnings.map((w) => (
             <div className="proj-warning" key={w.id}>
               <div className="banner warn">{w.text}</div>
-              <input
-                placeholder="Auditor response (required before the working paper can be finalised)"
-                value={warningResponses[w.id] ?? ''}
-                onChange={(e) =>
-                  setWarningResponses((prev) => ({ ...prev, [w.id]: e.target.value }))
-                }
-              />
             </div>
           ))}
 

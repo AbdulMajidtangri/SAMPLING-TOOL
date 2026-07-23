@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   activeTransactions,
   buildTransactions,
@@ -265,6 +265,223 @@ function displayRowId(t: { voucherNo: string; accountNo: string }): string {
   return '—'
 }
 
+/** How many table rows to render at once — keeps huge ledgers responsive. */
+const ROW_RENDER_CHUNK = 200
+
+/**
+ * One population row. Memoized with row-local draft state for the exclusion
+ * reason, so typing a reason re-renders only this row — not the whole table.
+ */
+const PopulationRow = memo(function PopulationRow({
+  t,
+  onExclude,
+  onRestore,
+}: {
+  t: LedgerTransaction
+  onExclude: (id: string, reason: string) => void
+  onRestore: (id: string) => void
+}) {
+  const [reason, setReason] = useState('')
+  return (
+    <tr className={t.excluded ? 'excluded-row' : ''}>
+      <td>{t.id}</td>
+      <td>{t.date || '—'}</td>
+      <td>{displayRowId(t)}</td>
+      <td>{t.description || '—'}</td>
+      <td>{formatMoney(t.coverageAmount)}</td>
+      <td>
+        {[
+          t.needsCoverageResolution ? 'both sides' : '',
+          t.looksLikeTotal ? 'total' : '',
+          t.looksLikeOpeningClosing ? 'open/close' : '',
+          t.isZeroOrNegative ? 'zero/neg' : '',
+          t.isDuplicateVoucher ? 'duplicate' : '',
+          t.excluded ? `excluded: ${t.exclusionReason}` : '',
+        ]
+          .filter(Boolean)
+          .join(', ') || '—'}
+      </td>
+      <td>
+        {t.excluded ? (
+          <button type="button" className="small-btn" onClick={() => onRestore(t.id)}>
+            Restore
+          </button>
+        ) : t.needsCoverageResolution ? (
+          <span className="hint">Resolve above</span>
+        ) : (
+          <div className="row-actions">
+            <input
+              className="exclude-input"
+              placeholder="Reason to exclude"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+            <button
+              type="button"
+              className="small-btn"
+              onClick={() => {
+                onExclude(t.id, reason)
+                if (reason.trim()) setReason('')
+              }}
+            >
+              Exclude
+            </button>
+          </div>
+        )}
+      </td>
+    </tr>
+  )
+})
+
+/**
+ * Population table. Memoized so typing in unrelated form fields never
+ * re-renders it, and rendered in chunks so huge ledgers stay fast.
+ */
+const PopulationTable = memo(function PopulationTable({
+  transactions,
+  onExclude,
+  onRestore,
+}: {
+  transactions: LedgerTransaction[]
+  onExclude: (id: string, reason: string) => void
+  onRestore: (id: string) => void
+}) {
+  const [visibleCount, setVisibleCount] = useState(ROW_RENDER_CHUNK)
+  const visible =
+    transactions.length > visibleCount
+      ? transactions.slice(0, visibleCount)
+      : transactions
+  return (
+    <>
+      <div className="preview-table-wrap preview-table-all">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Date</th>
+              <th>Voucher / Acct</th>
+              <th>Description</th>
+              <th>Coverage</th>
+              <th>Flags</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((t) => (
+              <PopulationRow
+                key={t.id}
+                t={t}
+                onExclude={onExclude}
+                onRestore={onRestore}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {transactions.length > visibleCount && (
+        <div className="actions">
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setVisibleCount((c) => c + 1000)}
+          >
+            Show more rows ({transactions.length - visibleCount} more not shown)
+          </button>
+        </div>
+      )}
+    </>
+  )
+})
+
+/**
+ * Working-paper selected items table — memoized so typing in the WP header
+ * fields (WP number, period, sign-off) never re-renders the whole table.
+ */
+const WpSelectedTable = memo(function WpSelectedTable({
+  selected,
+}: {
+  selected: LedgerTransaction[]
+}) {
+  return (
+    <div className="preview-table-wrap wp-table">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Date</th>
+            <th>Voucher No</th>
+            <th>Description</th>
+            <th>Debit</th>
+            <th>Credit</th>
+            <th>Coverage amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {selected.length === 0 ? (
+            <tr><td colSpan={7}>None selected.</td></tr>
+          ) : (
+            selected.map((t, index) => (
+              <tr key={`wp-sel-${t.id}`}>
+                <td>{index + 1}</td>
+                <td>{t.date || '—'}</td>
+                <td>{t.voucherNo || displayRowId(t)}</td>
+                <td>{t.description || '—'}</td>
+                <td>{formatMoney(t.debit)}</td>
+                <td>{formatMoney(t.credit)}</td>
+                <td>{formatMoney(t.coverageAmount)}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+})
+
+/** Haphazard manual pick list — memoized and chunked for large populations. */
+const HaphazardPickList = memo(function HaphazardPickList({
+  items,
+  selectedIds,
+  onToggle,
+}: {
+  items: LedgerTransaction[]
+  selectedIds: string[]
+  onToggle: (id: string) => void
+}) {
+  const [visibleCount, setVisibleCount] = useState(ROW_RENDER_CHUNK)
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  const visible = items.length > visibleCount ? items.slice(0, visibleCount) : items
+  return (
+    <>
+      <div className="pick-list">
+        {visible.map((t) => (
+          <label key={t.id} className="pick-item">
+            <input
+              type="checkbox"
+              checked={selectedSet.has(t.id)}
+              onChange={() => onToggle(t.id)}
+            />
+            <span>
+              {t.id} · {displayRowId(t)} · {formatMoney(t.coverageAmount)}
+            </span>
+          </label>
+        ))}
+      </div>
+      {items.length > visibleCount && (
+        <div className="actions">
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setVisibleCount((c) => c + 1000)}
+          >
+            Show more items ({items.length - visibleCount} more not shown)
+          </button>
+        </div>
+      )}
+    </>
+  )
+})
+
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [screen, setScreen] = useState<MainScreenId>('samplingWorkspace')
@@ -287,7 +504,6 @@ export default function App() {
     null,
   )
   const [populationConfirmed, setPopulationConfirmed] = useState(false)
-  const [excludeDrafts, setExcludeDrafts] = useState<Record<string, string>>({})
 
   const [engagement, setEngagement] = useState<EngagementMeta>(defaultEngagement())
   const [designInputs, setDesignInputs] = useState<DesignInputs>(defaultDesignInputs())
@@ -420,8 +636,9 @@ export default function App() {
   /**
    * Clears all state that is downstream of `fromStep` and, if the wizard is
    * currently further along than `fromStep`, moves it back to `fromStep`.
+   * Stable (useCallback) so memoized tables keep their props unchanged.
    */
-  function invalidateFrom(fromStep: WizardStep) {
+  const invalidateFrom = useCallback(function invalidateFrom(fromStep: WizardStep) {
     const idx = STEPS.indexOf(fromStep)
     const confirmIdx = STEPS.indexOf('confirm')
     const planningIdx = STEPS.indexOf('planning')
@@ -432,7 +649,6 @@ export default function App() {
       setTransactions([])
       setPopulationSummary(null)
       setPopulationConfirmed(false)
-      setExcludeDrafts({})
     }
     if (idx <= confirmIdx) {
       setPopulationConfirmed(false)
@@ -460,7 +676,7 @@ export default function App() {
     setError('')
     setWarnings([])
     setStep((current) => (STEPS.indexOf(current) > idx ? fromStep : current))
-  }
+  }, [])
 
   async function onUpload(file: File) {
     setBusy(true)
@@ -624,71 +840,78 @@ export default function App() {
     setTransactions(result.transactions)
     setPopulationSummary(buildPopulationSummary(result.transactions))
     setPopulationConfirmed(false)
-    setExcludeDrafts({})
     advanceToStep('confirm')
   }
 
-  function resolveRow(id: string, resolution: CoverageResolution) {
-    setTransactions((prev) => {
-      const next = prev.map((t) =>
-        t.id === id ? resolveTransactionCoverage(t, resolution) : t,
-      )
-      setPopulationSummary(buildPopulationSummary(next))
-      return next
-    })
-    invalidateFrom('confirm')
-    setPopulationConfirmed(false)
-    setError('')
-  }
+  const resolveRow = useCallback(
+    (id: string, resolution: CoverageResolution) => {
+      setTransactions((prev) => {
+        const next = prev.map((t) =>
+          t.id === id ? resolveTransactionCoverage(t, resolution) : t,
+        )
+        setPopulationSummary(buildPopulationSummary(next))
+        return next
+      })
+      invalidateFrom('confirm')
+      setPopulationConfirmed(false)
+      setError('')
+    },
+    [invalidateFrom],
+  )
 
-  function excludeRow(id: string) {
-    const reason = (excludeDrafts[id] ?? '').trim()
-    if (!reason) {
-      setError('Please enter a reason before excluding this row.')
-      return
-    }
-    setTransactions((prev) => {
-      const next = prev.map((t) =>
-        t.id === id ? { ...t, excluded: true, exclusionReason: reason } : t,
-      )
-      setPopulationSummary(buildPopulationSummary(next))
-      return next
-    })
-    setExcludeDrafts((prev) => ({ ...prev, [id]: '' }))
-    invalidateFrom('confirm')
-    setPopulationConfirmed(false)
-    setError('')
-  }
+  const excludeRow = useCallback(
+    (id: string, reasonRaw: string) => {
+      const reason = reasonRaw.trim()
+      if (!reason) {
+        setError('Please enter a reason before excluding this row.')
+        return
+      }
+      setTransactions((prev) => {
+        const next = prev.map((t) =>
+          t.id === id ? { ...t, excluded: true, exclusionReason: reason } : t,
+        )
+        setPopulationSummary(buildPopulationSummary(next))
+        return next
+      })
+      invalidateFrom('confirm')
+      setPopulationConfirmed(false)
+      setError('')
+    },
+    [invalidateFrom],
+  )
 
-  function restoreRow(id: string) {
-    setTransactions((prev) => {
-      const next = prev.map((t) => {
-        if (t.id !== id) return t
-        const both = Math.abs(t.debit) > 0 && Math.abs(t.credit) > 0
-        if (both && (!t.coverageResolution || t.coverageResolution === 'exclude')) {
+  const restoreRow = useCallback(
+    (id: string) => {
+      setTransactions((prev) => {
+        const next = prev.map((t) => {
+          if (t.id !== id) return t
+          const both = Math.abs(t.debit) > 0 && Math.abs(t.credit) > 0
+          if (both && (!t.coverageResolution || t.coverageResolution === 'exclude')) {
+            return {
+              ...t,
+              excluded: false,
+              exclusionReason: '',
+              coverageResolution: undefined,
+              needsCoverageResolution: true,
+              coverageAmount: 0,
+              bothSidesWarning: true,
+            }
+          }
           return {
             ...t,
             excluded: false,
             exclusionReason: '',
-            coverageResolution: undefined,
-            needsCoverageResolution: true,
-            coverageAmount: 0,
-            bothSidesWarning: true,
           }
-        }
-        return {
-          ...t,
-          excluded: false,
-          exclusionReason: '',
-        }
+        })
+        setPopulationSummary(buildPopulationSummary(next))
+        return next
       })
-      setPopulationSummary(buildPopulationSummary(next))
-      return next
-    })
-    invalidateFrom('confirm')
-    setPopulationConfirmed(false)
-    setError('')
-  }
+      invalidateFrom('confirm')
+      setPopulationConfirmed(false)
+      setError('')
+    },
+    [invalidateFrom],
+  )
 
   function continueFromConfirm() {
     const unresolved = unresolvedBothSides(transactions)
@@ -836,14 +1059,17 @@ export default function App() {
     advanceToStep('selection')
   }
 
-  function toggleHaphazard(id: string) {
-    invalidateFrom('selection')
-    setHaphazardIds((prev) => {
-      if (prev.includes(id)) return prev.filter((x) => x !== id)
-      if (prev.length >= sampleDesign.confirmedSize) return prev
-      return [...prev, id]
-    })
-  }
+  const toggleHaphazard = useCallback(
+    (id: string) => {
+      invalidateFrom('selection')
+      setHaphazardIds((prev) => {
+        if (prev.includes(id)) return prev.filter((x) => x !== id)
+        if (prev.length >= sampleDesign.confirmedSize) return prev
+        return [...prev, id]
+      })
+    },
+    [invalidateFrom, sampleDesign.confirmedSize],
+  )
 
   function runSelection() {
     const pop = activePop
@@ -981,7 +1207,6 @@ export default function App() {
     setTransactions([])
     setPopulationSummary(null)
     setPopulationConfirmed(false)
-    setExcludeDrafts({})
     setEngagement(defaultEngagement())
     setDesignInputs(defaultDesignInputs())
     setSampleDesign(defaultSampleDesign())
@@ -1548,66 +1773,11 @@ export default function App() {
                 )}
 
                 <h3>Population rows</h3>
-                <div className="preview-table-wrap preview-table-all">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>Date</th>
-                        <th>Voucher / Acct</th>
-                        <th>Description</th>
-                        <th>Coverage</th>
-                        <th>Flags</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {transactions.map((t) => (
-                        <tr key={`confirm-${t.id}`} className={t.excluded ? 'excluded-row' : ''}>
-                          <td>{t.id}</td>
-                          <td>{t.date || '—'}</td>
-                          <td>{displayRowId(t)}</td>
-                          <td>{t.description || '—'}</td>
-                          <td>{formatMoney(t.coverageAmount)}</td>
-                          <td>
-                            {[
-                              t.needsCoverageResolution ? 'both sides' : '',
-                              t.looksLikeTotal ? 'total' : '',
-                              t.looksLikeOpeningClosing ? 'open/close' : '',
-                              t.isZeroOrNegative ? 'zero/neg' : '',
-                              t.isDuplicateVoucher ? 'duplicate' : '',
-                              t.excluded ? `excluded: ${t.exclusionReason}` : '',
-                            ]
-                              .filter(Boolean)
-                              .join(', ') || '—'}
-                          </td>
-                          <td>
-                            {t.excluded ? (
-                              <button type="button" className="small-btn" onClick={() => restoreRow(t.id)}>Restore</button>
-                            ) : t.needsCoverageResolution ? (
-                              <span className="hint">Resolve above</span>
-                            ) : (
-                              <div className="row-actions">
-                                <input
-                                  className="exclude-input"
-                                  placeholder="Reason to exclude"
-                                  value={excludeDrafts[t.id] ?? ''}
-                                  onChange={(e) =>
-                                    setExcludeDrafts((prev) => ({
-                                      ...prev,
-                                      [t.id]: e.target.value,
-                                    }))
-                                  }
-                                />
-                                <button type="button" className="small-btn" onClick={() => excludeRow(t.id)}>Exclude</button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <PopulationTable
+                  transactions={transactions}
+                  onExclude={excludeRow}
+                  onRestore={restoreRow}
+                />
 
                 {summary.byReason.length > 0 && (
                   <>
@@ -2152,20 +2322,11 @@ export default function App() {
                       Select exactly {sampleDesign.confirmedSize} items ({haphazardIds.length}{' '}
                       selected).
                     </p>
-                    <div className="pick-list">
-                      {activePop.map((t) => (
-                        <label key={t.id} className="pick-item">
-                          <input
-                            type="checkbox"
-                            checked={haphazardIds.includes(t.id)}
-                            onChange={() => toggleHaphazard(t.id)}
-                          />
-                          <span>
-                            {t.id} · {displayRowId(t)} · {formatMoney(t.coverageAmount)}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
+                    <HaphazardPickList
+                      items={activePop}
+                      selectedIds={haphazardIds}
+                      onToggle={toggleHaphazard}
+                    />
                   </>
                 )}
 
@@ -2551,38 +2712,7 @@ export default function App() {
                 The following {selected.length} item{selected.length === 1 ? '' : 's'}{' '}
                 {selected.length === 1 ? 'was' : 'were'} selected for testing.
               </p>
-              <div className="preview-table-wrap wp-table">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Date</th>
-                      <th>Voucher No</th>
-                      <th>Description</th>
-                      <th>Debit</th>
-                      <th>Credit</th>
-                      <th>Coverage amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selected.length === 0 ? (
-                      <tr><td colSpan={7}>None selected.</td></tr>
-                    ) : (
-                      selected.map((t, index) => (
-                        <tr key={`wp-sel-${t.id}`}>
-                          <td>{index + 1}</td>
-                          <td>{t.date || '—'}</td>
-                          <td>{t.voucherNo || displayRowId(t)}</td>
-                          <td>{t.description || '—'}</td>
-                          <td>{formatMoney(t.debit)}</td>
-                          <td>{formatMoney(t.credit)}</td>
-                          <td>{formatMoney(t.coverageAmount)}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <WpSelectedTable selected={selected} />
             </section>
 
             <section>

@@ -1,0 +1,105 @@
+name: Build installers (Windows + macOS)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - building_sampling_tool
+    paths:
+      - '.github/workflows/build-installers.yml'
+      - 'src/**'
+      - 'electron/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer and main process
+        run: npm run build
+
+      - name: Package Windows installer (NSIS)
+        run: npx electron-builder --win --publish never
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: release/*.exe
+          if-no-files-found: error
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer and main process
+        run: npm run build
+
+      - name: Package universal macOS installer (Intel + Apple Silicon)
+        run: npx electron-builder --mac --publish never
+        env:
+          # No Apple developer certificate — produce an unsigned build.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-installer
+          path: release/*.dmg
+          if-no-files-found: error
+
+  publish-release:
+    needs:
+      - build-windows
+      - build-mac
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Publish public release with download links
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Sampling Tool — Download
+          body: |
+            ## Download
+
+            - **Windows:** download the `.exe` file below, run it, and if Windows
+              SmartScreen appears click "More info" → "Run anyway".
+            - **Mac (all models — Intel and Apple Silicon):** download the `.dmg`
+              file below, open it, and drag Sampling Tool into Applications.
+              On first launch, right-click the app → Open → Open (or approve it
+              under System Settings → Privacy & Security → "Open Anyway").
+          make_latest: true
+          files: installers/*

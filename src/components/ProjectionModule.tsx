@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import {
   amountToSum,
   anomalyFlaggedButNotApproved,
@@ -184,17 +184,42 @@ const BUCKET_LABELS: Record<RegisterBucket, string> = {
   specific: 'Specifically selected',
 }
 
-/** Quick navigation chips for the long input screen. */
-const PROJ_NAV: Array<[string, string]> = [
-  ['blockA', 'A · Setup'],
-  ['blockB', 'B · Population'],
-  ['blockC', 'C · Planning'],
-  ['blockD', 'D · Sample'],
-  ['blockE', 'E–F · Register'],
-  ['blockG', 'G · Qualitative'],
-  ['blockH', 'H · Method'],
-  ['validation', 'Warnings & WP'],
+type ProjStepId =
+  | 'setup'
+  | 'population'
+  | 'planning'
+  | 'sample'
+  | 'register'
+  | 'method'
+  | 'review'
+
+const PROJ_STEPS: Array<{ id: ProjStepId; title: string; blurb: string }> = [
+  { id: 'setup', title: '1. Setup', blurb: 'What are you testing?' },
+  { id: 'population', title: '2. Population', blurb: 'Totals and residual' },
+  { id: 'planning', title: '3. Planning', blurb: 'Risk and limits' },
+  { id: 'sample', title: '4. Sample', blurb: 'Size and confirmations' },
+  { id: 'register', title: '5. Findings', blurb: 'Misstatements / deviations' },
+  { id: 'method', title: '6. Method', blurb: 'Project and review results' },
+  { id: 'review', title: '7. Working paper', blurb: 'Checks, then generate' },
 ]
+
+function FieldLabel({
+  children,
+  required,
+  optional,
+}: {
+  children: ReactNode
+  required?: boolean
+  optional?: boolean
+}) {
+  return (
+    <label className="proj-field-label">
+      <span>{children}</span>
+      {required ? <span className="proj-badge proj-badge-req">Required</span> : null}
+      {optional ? <span className="proj-badge proj-badge-opt">Optional</span> : null}
+    </label>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -202,6 +227,9 @@ const PROJ_NAV: Array<[string, string]> = [
 
 export default function ProjectionModule() {
   const [screen, setScreen] = useState<'inputs' | 'workingPaper'>('inputs')
+  const [step, setStep] = useState<ProjStepId>('setup')
+  const [showExtraBuckets, setShowExtraBuckets] = useState(false)
+  const [showMorePlanning, setShowMorePlanning] = useState(false)
 
   const [eng, setEng] = useState<EngagementBlock>({
     clientName: '',
@@ -780,6 +808,90 @@ export default function ProjectionModule() {
   }
 
   const canGenerateWp = hardBlocks.length === 0
+
+  const hasExtraBuckets =
+    comp.tested100Value > 0 ||
+    comp.tested100Count > 0 ||
+    comp.specificValue > 0 ||
+    comp.specificCount > 0
+
+  const stepDone: Record<ProjStepId, boolean> = {
+    setup: true,
+    population:
+      comp.totalValue > 0 &&
+      comp.totalCount > 0 &&
+      residualValue >= 0 &&
+      residualCount >= 0 &&
+      quality.noItemExceedsTolerable.answer !== '' &&
+      quality.noNegativeBalances.answer !== '' &&
+      quality.noZeroValueItems.answer !== '' &&
+      quality.homogeneous.answer !== '',
+    planning:
+      (isDetails
+        ? plan.tolerableMisstatement > 0 && plan.offsettingAppropriate !== ''
+        : plan.tolerableDeviationRatePct > 0) &&
+      !(
+        isDetails &&
+        plan.performanceMateriality > 0 &&
+        plan.tolerableMisstatement > plan.performanceMateriality
+      ),
+    sample:
+      sample.itemCount > 0 &&
+      sample.drawnFromResidualConfirmed &&
+      sample.sameBasisConfirmed &&
+      !(isDetails && residualValue > 0 && sample.recordedValue > residualValue) &&
+      !(residualCount > 0 && sample.itemCount > residualCount),
+    register: true,
+    method: method !== '' || !isDetails,
+    review: canGenerateWp,
+  }
+
+  const stepOrder = PROJ_STEPS.map((s) => s.id)
+  const stepIndex = stepOrder.indexOf(step)
+
+  function stepUnlocked(id: ProjStepId): boolean {
+    const idx = stepOrder.indexOf(id)
+    if (idx <= 0) return true
+    for (let i = 0; i < idx; i++) {
+      if (!stepDone[stepOrder[i]]) return false
+    }
+    return true
+  }
+
+  function goNext() {
+    const next = stepOrder[stepIndex + 1]
+    if (next && stepUnlocked(next)) setStep(next)
+  }
+
+  function goBack() {
+    const prev = stepOrder[stepIndex - 1]
+    if (prev) setStep(prev)
+  }
+
+  function stepActions(opts?: { nextDisabled?: boolean; nextLabel?: string }) {
+    const isLast = step === 'review'
+    return (
+      <div className="actions proj-step-actions">
+        {stepIndex > 0 ? (
+          <button type="button" className="ghost" onClick={goBack}>
+            ← Back
+          </button>
+        ) : (
+          <span />
+        )}
+        {!isLast ? (
+          <button
+            type="button"
+            className="primary"
+            disabled={opts?.nextDisabled ?? !stepDone[step]}
+            onClick={goNext}
+          >
+            {opts?.nextLabel ?? 'Continue'}
+          </button>
+        ) : null}
+      </div>
+    )
+  }
 
   const missingNarrative: string[] = useMemo(() => {
     const gaps: string[] = []
@@ -1649,681 +1761,1035 @@ export default function ProjectionModule() {
   }
 
   // -------------------------------------------------------------------------
-  // Screen 1: Inputs
+  // Screen 1: Inputs — one simple step at a time (like Sampling)
   // -------------------------------------------------------------------------
+
+  const qualityItems: Array<[keyof QualityBlock, string]> = [
+    ['noItemExceedsTolerable', 'No item exceeds tolerable misstatement'],
+    ['noNegativeBalances', 'No negative / credit balances'],
+    ['noZeroValueItems', 'No zero-value items'],
+    ['homogeneous', 'Population is reasonably homogeneous'],
+  ]
 
   return (
     <div className="workspace-layout proj-layout">
+      <aside className="progress-rail" aria-label="Projection steps">
+        <p className="rail-title">Your steps</p>
+        <p className="next-hint">
+          Fill required fields only. Client name and narratives go on the working paper.
+        </p>
+        <ol className="rail-list">
+          {PROJ_STEPS.map((s, index) => {
+            const unlocked = stepUnlocked(s.id)
+            const done = stepDone[s.id]
+            const active = step === s.id
+            return (
+              <li key={s.id}>
+                <button
+                  type="button"
+                  className={[
+                    'rail-item',
+                    active ? 'is-active' : '',
+                    done ? 'is-done' : '',
+                    !unlocked ? 'is-locked' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  disabled={!unlocked}
+                  onClick={() => setStep(s.id)}
+                >
+                  <span className="rail-num">{done && !active ? '✓' : index + 1}</span>
+                  <span>
+                    <strong>{s.title}</strong>
+                    <em>{s.blurb}</em>
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ol>
+      </aside>
+
       <main className="workspace-main proj-main">
-        {/* Block navigator */}
-        <nav className="proj-block-nav no-print" aria-label="Projection blocks">
-          {PROJ_NAV.map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() =>
-                document
-                  .getElementById(`proj-${id}`)
-                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-              }
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
+        <p className="proj-legend hint">
+          <span className="proj-badge proj-badge-req">Required</span> must be filled to continue ·{' '}
+          <span className="proj-badge proj-badge-opt">Optional</span> can be skipped
+        </p>
 
-        {/* Block A */}
-        <section className="ws-card is-active" id="proj-blockA">
-          <div className="ws-card-head">
-            <div>
-              <p className="section-kicker">Block A</p>
-              <h2>Test setup and population reconciliation</h2>
-              <p className="section-lead">
-                Only the choices that drive the calculations are made here. Client name,
-                period, references and descriptions are written directly on the working
-                paper.
-              </p>
-            </div>
-          </div>
-          <div className="form-grid grid-2">
-            <div>
-              <label>Test type</label>
-              <select
-                value={eng.testType}
-                onChange={(e) => {
-                  const tt = e.target.value as ProjTestType
-                  setEng((p) => ({ ...p, testType: tt }))
-                  setMethod(tt === 'controls' ? 'deviationRate' : '')
-                }}
-              >
-                <option value="details">Test of details</option>
-                <option value="controls">Test of controls</option>
-              </select>
-            </div>
-            <div>
-              <label>Assertion tested</label>
-              <select value={eng.assertion} onChange={(e) => setEng((p) => ({ ...p, assertion: e.target.value }))}>
-                {PROJ_ASSERTIONS.map((a) => (
-                  <option key={a} value={a}>{a}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label>Direction of test</label>
-              <select value={eng.direction} onChange={(e) => setEng((p) => ({ ...p, direction: e.target.value as ProjDirection }))}>
-                <option>Overstatement</option>
-                <option>Understatement</option>
-                <option>Both</option>
-              </select>
-            </div>
-            <div>
-              <label>Reporting currency</label>
-              <select value={eng.currency} onChange={(e) => setEng((p) => ({ ...p, currency: e.target.value }))}>
-                {PROJ_CURRENCIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <h3>Population completeness and reconciliation (4.1)</h3>
-          <div className="form-grid grid-3">
-            <div>
-              <label>Value per population listing</label>
-              <NumberTextInput integer={false} value={recon.valuePerListing} onValueChange={(v) => setRecon((p) => ({ ...p, valuePerListing: v }))} />
-            </div>
-            <div>
-              <label>Value per GL / financial statements</label>
-              <NumberTextInput integer={false} value={recon.valuePerGL} onValueChange={(v) => setRecon((p) => ({ ...p, valuePerGL: v }))} />
-            </div>
-            <div>
-              <label>Reconciling difference (auto)</label>
-              <input value={fmtNum(reconDifference)} readOnly disabled />
-            </div>
-          </div>
-          {reconDifference !== 0 && (
-            <>
-              <label>Explanation of difference (required when not nil)</label>
-              <textarea rows={2} value={recon.explanation} onChange={(e) => setRecon((p) => ({ ...p, explanation: e.target.value }))} />
-            </>
-          )}
-          <p className="hint">
-            "Reconciled to", "verified by" and the population source description are written
-            on the working paper.
-          </p>
-        </section>
-
-        {/* Block B */}
-        <section className="ws-card is-active" id="proj-blockB">
-          <div className="ws-card-head">
-            <div>
-              <p className="section-kicker">Block B</p>
-              <h2>Population composition — three buckets</h2>
-              <p className="section-lead">
-                Items tested 100% and specifically selected items are never projected. Only
-                the residual population is projected to.
-              </p>
-            </div>
-          </div>
-          <div className="form-grid grid-2">
-            <div>
-              <label>Total population value</label>
-              <NumberTextInput integer={false} value={comp.totalValue} onValueChange={(v) => setComp((p) => ({ ...p, totalValue: v }))} />
-            </div>
-            <div>
-              <label>Total population item count</label>
-              <NumberTextInput value={comp.totalCount} onValueChange={(v) => setComp((p) => ({ ...p, totalCount: v }))} />
-            </div>
-            <div>
-              <label>Value of items tested 100%</label>
-              <NumberTextInput integer={false} value={comp.tested100Value} onValueChange={(v) => setComp((p) => ({ ...p, tested100Value: v }))} />
-            </div>
-            <div>
-              <label>Count of items tested 100%</label>
-              <NumberTextInput value={comp.tested100Count} onValueChange={(v) => setComp((p) => ({ ...p, tested100Count: v }))} />
-            </div>
-            <div>
-              <label>Value of specifically selected items</label>
-              <NumberTextInput integer={false} value={comp.specificValue} onValueChange={(v) => setComp((p) => ({ ...p, specificValue: v }))} />
-            </div>
-            <div>
-              <label>Count of specifically selected items</label>
-              <NumberTextInput value={comp.specificCount} onValueChange={(v) => setComp((p) => ({ ...p, specificCount: v }))} />
-            </div>
-          </div>
-          <div className="stat-grid">
-            <div>
-              <span>Residual population value</span>
-              <strong>{fmtNum(residualValue)}</strong>
-            </div>
-            <div>
-              <span>Residual population count</span>
-              <strong>{residualCount}</strong>
-            </div>
-          </div>
-          {(residualValue < 0 || residualCount < 0) && (
-            <div className="banner error">
-              Items tested 100% plus specifically selected items exceed the total population.
-            </div>
-          )}
-
-          <h3>Population data quality pre checks (5.1)</h3>
-          {(
-            [
-              ['noItemExceedsTolerable', 'No single item in the residual population exceeds the tolerable misstatement'],
-              ['noNegativeBalances', 'Residual population contains no negative or credit balances (or they have been removed and dealt with separately)'],
-              ['noZeroValueItems', 'Residual population contains no zero value items (or they are excluded from the item count)'],
-              ['homogeneous', 'The residual population is reasonably homogeneous in value'],
-            ] as Array<[keyof QualityBlock, string]>
-          ).map(([key, label]) => (
-            <div className="proj-quality-row" key={key}>
-              <span className="proj-quality-label">{label}</span>
-              <select
-                value={quality[key].answer}
-                onChange={(e) =>
-                  setQuality((p) => ({
-                    ...p,
-                    [key]: { ...p[key], answer: e.target.value as YesNo },
-                  }))
-                }
-              >
-                <option value="">—</option>
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-              <input
-                placeholder="Note (printed on the working paper)"
-                value={quality[key].note}
-                onChange={(e) =>
-                  setQuality((p) => ({ ...p, [key]: { ...p[key], note: e.target.value } }))
-                }
-              />
-            </div>
-          ))}
-        </section>
-
-        {/* Block C */}
-        <section className="ws-card is-active" id="proj-blockC">
-          <div className="ws-card-head">
-            <div>
-              <p className="section-kicker">Block C</p>
-              <h2>Planning parameters</h2>
-              <p className="section-lead">
-                In a non statistical approach the documented judgement is the evidence. These
-                inputs are printed on the face of the working paper.
-              </p>
-            </div>
-          </div>
-          <div className="form-grid grid-3">
-            <div>
-              <label>Assessed risk of material misstatement</label>
-              <select value={plan.assessedRisk} onChange={(e) => setPlan((p) => ({ ...p, assessedRisk: e.target.value as ProjRisk }))}>
-                <option>Low</option>
-                <option>Moderate</option>
-                <option>High</option>
-                <option>Significant</option>
-              </select>
-            </div>
-            <div>
-              <label>Reliance placed on controls</label>
-              <select value={plan.reliance} onChange={(e) => setPlan((p) => ({ ...p, reliance: e.target.value as ProjReliance }))}>
-                <option>None</option>
-                <option>Partial</option>
-                <option>Full</option>
-              </select>
-            </div>
-            <div>
-              <label>Selection method used</label>
-              <select value={plan.selectionMethod} onChange={(e) => setPlan((p) => ({ ...p, selectionMethod: e.target.value as ProjSelectionMethod }))}>
-                {(Object.keys(SELECTION_METHOD_LABELS) as ProjSelectionMethod[]).map((m) => (
-                  <option key={m} value={m}>{SELECTION_METHOD_LABELS[m]}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {isDetails ? (
-            <div className="form-grid grid-3">
+        {step === 'setup' && (
+          <section className="ws-card is-active">
+            <div className="ws-card-head">
               <div>
-                <label>Performance materiality</label>
-                <NumberTextInput integer={false} value={plan.performanceMateriality} onValueChange={(v) => setPlan((p) => ({ ...p, performanceMateriality: v }))} />
+                <p className="section-kicker">Step 1</p>
+                <h2>What are you testing?</h2>
+                <p className="section-lead">
+                  Four choices. Everything else (client, period, WP ref) is filled on the working paper.
+                </p>
+              </div>
+            </div>
+            <div className="form-grid grid-2">
+              <div>
+                <FieldLabel required>Test type</FieldLabel>
+                <select
+                  value={eng.testType}
+                  onChange={(e) => {
+                    const tt = e.target.value as ProjTestType
+                    setEng((p) => ({ ...p, testType: tt }))
+                    setMethod(tt === 'controls' ? 'deviationRate' : '')
+                  }}
+                >
+                  <option value="details">Test of details</option>
+                  <option value="controls">Test of controls</option>
+                </select>
               </div>
               <div>
-                <label>Tolerable misstatement for this population</label>
+                <FieldLabel required>Assertion</FieldLabel>
+                <select
+                  value={eng.assertion}
+                  onChange={(e) => setEng((p) => ({ ...p, assertion: e.target.value }))}
+                >
+                  {PROJ_ASSERTIONS.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <FieldLabel required>Direction</FieldLabel>
+                <select
+                  value={eng.direction}
+                  onChange={(e) =>
+                    setEng((p) => ({ ...p, direction: e.target.value as ProjDirection }))
+                  }
+                >
+                  <option>Overstatement</option>
+                  <option>Understatement</option>
+                  <option>Both</option>
+                </select>
+              </div>
+              <div>
+                <FieldLabel required>Currency</FieldLabel>
+                <select
+                  value={eng.currency}
+                  onChange={(e) => setEng((p) => ({ ...p, currency: e.target.value }))}
+                >
+                  {PROJ_CURRENCIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {stepActions()}
+          </section>
+        )}
+
+        {step === 'population' && (
+          <section className="ws-card is-active">
+            <div className="ws-card-head">
+              <div>
+                <p className="section-kicker">Step 2</p>
+                <h2>Population</h2>
+                <p className="section-lead">
+                  Enter the total population. Residual is calculated automatically.
+                </p>
+              </div>
+            </div>
+
+            <div className="form-grid grid-2">
+              <div>
+                <FieldLabel required>Total population value</FieldLabel>
                 <NumberTextInput
                   integer={false}
-                  value={plan.tolerableMisstatement}
-                  max={plan.performanceMateriality > 0 ? plan.performanceMateriality : undefined}
-                  onValueChange={(v) => setPlan((p) => ({ ...p, tolerableMisstatement: v }))}
+                  value={comp.totalValue}
+                  onValueChange={(v) => setComp((p) => ({ ...p, totalValue: v }))}
                 />
               </div>
               <div>
-                <label>Expected misstatement used in sizing</label>
-                <NumberTextInput integer={false} value={plan.expectedMisstatement} onValueChange={(v) => setPlan((p) => ({ ...p, expectedMisstatement: v }))} />
+                <FieldLabel required>Total item count</FieldLabel>
+                <NumberTextInput
+                  value={comp.totalCount}
+                  onValueChange={(v) => setComp((p) => ({ ...p, totalCount: v }))}
+                />
               </div>
             </div>
-          ) : (
-            <div className="form-grid grid-2">
+
+            <div className="stat-grid">
               <div>
-                <label>Tolerable rate of deviation (%)</label>
-                <NumberTextInput integer={false} max={100} value={plan.tolerableDeviationRatePct} onValueChange={(v) => setPlan((p) => ({ ...p, tolerableDeviationRatePct: v }))} />
+                <span>Residual value (projected)</span>
+                <strong>{fmtNum(residualValue)}</strong>
               </div>
               <div>
-                <label>Expected rate of deviation used in sizing (%)</label>
-                <NumberTextInput integer={false} max={100} value={plan.expectedDeviationRatePct} onValueChange={(v) => setPlan((p) => ({ ...p, expectedDeviationRatePct: v }))} />
+                <span>Residual count</span>
+                <strong>{residualCount}</strong>
               </div>
             </div>
-          )}
 
-          <div className="form-grid grid-2">
-            <div>
-              <label>Basis for sample size</label>
-              <select value={plan.sampleSizeBasis} onChange={(e) => setPlan((p) => ({ ...p, sampleSizeBasis: e.target.value as ProjSampleSizeBasis }))}>
-                <option>Firm sampling table</option>
-                <option>Firm formula</option>
-                <option>Professional judgement</option>
-              </select>
-            </div>
-            {isDetails && (
-              <div>
-                <label>Is offsetting over/understatements appropriate?</label>
-                <select value={plan.offsettingAppropriate} onChange={(e) => setPlan((p) => ({ ...p, offsettingAppropriate: e.target.value as YesNo }))}>
-                  <option value="">—</option>
-                  <option value="yes">Yes</option>
-                  <option value="no">No</option>
-                </select>
-              </div>
-            )}
-          </div>
-          <p className="hint">
-            The written narrative — basis for the tolerable limit, sample size rationale and
-            the offsetting reason — is completed directly on the working paper.
-          </p>
-          {isDetails && plan.performanceMateriality > 0 && plan.tolerableMisstatement > plan.performanceMateriality && (
-            <div className="banner error">Tolerable misstatement may not exceed performance materiality.</div>
-          )}
-        </section>
-
-        {/* Block D */}
-        <section className="ws-card is-active" id="proj-blockD">
-          <div className="ws-card-head">
-            <div>
-              <p className="section-kicker">Block D</p>
-              <h2>Sample information</h2>
-            </div>
-          </div>
-          <div className="form-grid grid-3">
-            <div>
-              <label>Sample item count</label>
-              <NumberTextInput value={sample.itemCount} onValueChange={(v) => setSample((p) => ({ ...p, itemCount: v }))} />
-            </div>
-            {isDetails && (
-              <div>
-                <label>Sample recorded value</label>
-                <NumberTextInput integer={false} value={sample.recordedValue} onValueChange={(v) => setSample((p) => ({ ...p, recordedValue: v }))} />
-              </div>
-            )}
-            {isDetails && (
-              <div>
-                <label>Total audited value of the sample (Mean per Unit only)</label>
-                <NumberTextInput integer={false} value={sample.auditedValueTotal} onValueChange={(v) => setSample((p) => ({ ...p, auditedValueTotal: v }))} />
-              </div>
-            )}
-          </div>
-          <p className="hint">
-            The date range covered by the sample is written on the working paper.
-          </p>
-          <label className="check-row">
-            <input type="checkbox" checked={sample.drawnFromResidualConfirmed} onChange={(e) => setSample((p) => ({ ...p, drawnFromResidualConfirmed: e.target.checked }))} />
-            <span>I confirm the sample was drawn only from the residual population.</span>
-          </label>
-          <label className="check-row">
-            <input type="checkbox" checked={sample.sameBasisConfirmed} onChange={(e) => setSample((p) => ({ ...p, sameBasisConfirmed: e.target.checked }))} />
-            <span>I confirm the sample and population are stated on the same basis (recorded values, same currency, same period).</span>
-          </label>
-        </section>
-
-        {/* Block E */}
-        <section className="ws-card is-active" id="proj-blockE">
-          <div className="ws-card-head">
-            <div>
-              <p className="section-kicker">Blocks E–F</p>
-              <h2>{isDetails ? 'Misstatement register' : 'Deviation register'}</h2>
-              <p className="section-lead">
-                One line per identified {isDetails ? 'misstatement' : 'deviation'}. The
-                anomaly flag has no effect until its justification is complete and reviewer
-                approved (Block F gate).
-              </p>
-            </div>
-          </div>
-
-          {isDetails ? (
-            <>
-              <div className="preview-table-wrap preview-table-all">
-                <table className="proj-register">
-                  <thead>
-                    <tr>
-                      <th>Ref</th>
-                      <th>Bucket</th>
-                      <th>Recorded</th>
-                      <th>Audited</th>
-                      <th>Difference</th>
-                      <th>Anomaly</th>
-                      <th>Corrected</th>
-                      <th>Fraud</th>
-                      <th>Description</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {mEntries.map((e) => {
-                      const d = entryDifference(e)
-                      const rows = [
-                        <tr key={e.id}>
-                          <td><input className="proj-cell" value={e.itemRef} onChange={(ev) => updateMEntry(e.id, { itemRef: ev.target.value })} /></td>
-                          <td>
-                            <select value={e.bucket} onChange={(ev) => updateMEntry(e.id, { bucket: ev.target.value as RegisterBucket })}>
-                              {(Object.keys(BUCKET_LABELS) as RegisterBucket[]).map((b) => (
-                                <option key={b} value={b}>{BUCKET_LABELS[b]}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td><NumberTextInput className="proj-cell" integer={false} value={e.recordedValue} onValueChange={(v) => updateMEntry(e.id, { recordedValue: v })} /></td>
-                          <td><NumberTextInput className="proj-cell" integer={false} value={e.auditedValue} onValueChange={(v) => updateMEntry(e.id, { auditedValue: v })} /></td>
-                          <td className={d >= 0 ? '' : 'proj-under'}>
-                            {fmtNum(d)} {d !== 0 ? (d > 0 ? '(over)' : '(under)') : ''}
-                          </td>
-                          <td>
-                            <label className="check-row proj-check">
-                              <input
-                                type="checkbox"
-                                checked={e.anomalyFlagged}
-                                onChange={(ev) => {
-                                  updateMEntry(e.id, { anomalyFlagged: ev.target.checked })
-                                  setOpenAnomalyId(ev.target.checked ? e.id : null)
-                                }}
-                              />
-                              <span>{isAnomalyApproved(e) ? 'approved' : e.anomalyFlagged ? 'pending' : ''}</span>
-                            </label>
-                          </td>
-                          <td><input type="checkbox" checked={e.correctedByManagement} onChange={(ev) => updateMEntry(e.id, { correctedByManagement: ev.target.checked })} /></td>
-                          <td><input type="checkbox" checked={e.fraudIndicator} onChange={(ev) => updateMEntry(e.id, { fraudIndicator: ev.target.checked })} /></td>
-                          <td><input className="proj-cell" value={e.description} onChange={(ev) => updateMEntry(e.id, { description: ev.target.value })} /></td>
-                          <td>
-                            <button type="button" className="small-btn" onClick={() => setMEntries((prev) => prev.filter((x) => x.id !== e.id))}>Remove</button>
-                            {e.anomalyFlagged && (
-                              <button type="button" className="small-btn" onClick={() => setOpenAnomalyId(openAnomalyId === e.id ? null : e.id)}>
-                                {openAnomalyId === e.id ? 'Hide gate' : 'Anomaly gate'}
-                              </button>
-                            )}
-                          </td>
-                        </tr>,
-                      ]
-                      if (e.anomalyFlagged && openAnomalyId === e.id) rows.push(anomalyEditor(e, 'm'))
-                      return rows
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="actions">
-                <button type="button" className="ghost" onClick={() => setMEntries((prev) => [...prev, newMisstatementEntry()])}>
-                  + Add misstatement
-                </button>
-              </div>
-              <div className="stat-grid">
-                <div><span>Gross over (GO)</span><strong>{fmtNum(agg.GO)}</strong></div>
-                <div><span>Gross under (GU)</span><strong>{fmtNum(agg.GU)}</strong></div>
-                <div><span>Representative net (RN)</span><strong>{fmtNum(agg.RN)}</strong></div>
-                <div><span>Factual net (FN)</span><strong>{fmtNum(agg.FN)}</strong></div>
-                <div><span>Anomalous net (AN, approved)</span><strong>{fmtNum(agg.AN)}</strong></div>
-              </div>
-              <p className="hint">
-                Management correction affects only the amount carried to the Summary of
-                Uncorrected Misstatements. The module always projects on the misstatements as
-                found (8.4).
-              </p>
-            </>
-          ) : (
-            <>
-              <div className="preview-table-wrap preview-table-all">
-                <table className="proj-register">
-                  <thead>
-                    <tr>
-                      <th>Ref</th>
-                      <th>Bucket</th>
-                      <th>Nature of deviation</th>
-                      <th>Anomaly</th>
-                      <th>Fraud</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dEntries.map((e) => {
-                      const rows = [
-                        <tr key={e.id}>
-                          <td><input className="proj-cell" value={e.itemRef} onChange={(ev) => updateDEntry(e.id, { itemRef: ev.target.value })} /></td>
-                          <td>
-                            <select value={e.bucket} onChange={(ev) => updateDEntry(e.id, { bucket: ev.target.value as RegisterBucket })}>
-                              {(Object.keys(BUCKET_LABELS) as RegisterBucket[]).map((b) => (
-                                <option key={b} value={b}>{BUCKET_LABELS[b]}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td><input className="proj-cell" value={e.natureOfDeviation} onChange={(ev) => updateDEntry(e.id, { natureOfDeviation: ev.target.value })} /></td>
-                          <td>
-                            <label className="check-row proj-check">
-                              <input
-                                type="checkbox"
-                                checked={e.anomalyFlagged}
-                                onChange={(ev) => {
-                                  updateDEntry(e.id, { anomalyFlagged: ev.target.checked })
-                                  setOpenAnomalyId(ev.target.checked ? e.id : null)
-                                }}
-                              />
-                              <span>{isAnomalyApproved(e) ? 'approved' : e.anomalyFlagged ? 'pending' : ''}</span>
-                            </label>
-                          </td>
-                          <td><input type="checkbox" checked={e.fraudIndicator} onChange={(ev) => updateDEntry(e.id, { fraudIndicator: ev.target.checked })} /></td>
-                          <td>
-                            <button type="button" className="small-btn" onClick={() => setDEntries((prev) => prev.filter((x) => x.id !== e.id))}>Remove</button>
-                            {e.anomalyFlagged && (
-                              <button type="button" className="small-btn" onClick={() => setOpenAnomalyId(openAnomalyId === e.id ? null : e.id)}>
-                                {openAnomalyId === e.id ? 'Hide gate' : 'Anomaly gate'}
-                              </button>
-                            )}
-                          </td>
-                        </tr>,
-                      ]
-                      if (e.anomalyFlagged && openAnomalyId === e.id) rows.push(anomalyEditor(e, 'd'))
-                      return rows
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="actions">
-                <button type="button" className="ghost" onClick={() => setDEntries((prev) => [...prev, newDeviationEntry()])}>
-                  + Add deviation
-                </button>
-              </div>
-              <p className="hint">
-                Representative deviations (projected): {representativeDeviations}. Approved
-                anomalous deviations are excluded from the numerator and disclosed in narrative;
-                they are never added back to a rate (11.5).
-              </p>
-            </>
-          )}
-        </section>
-
-        {/* Block G */}
-        <section className="ws-card is-active" id="proj-blockG">
-          <div className="ws-card-head">
-            <div>
-              <p className="section-kicker">Block G</p>
-              <h2>Qualitative evaluation</h2>
-              <p className="section-lead">
-                The qualitative narrative (nature and cause, systematic or isolated, effects,
-                control deficiency) is written directly on the working paper. Only the fraud
-                indicator is recorded here because it gates the calculations.
-              </p>
-            </div>
-          </div>
-          <label className="check-row">
-            <input type="checkbox" checked={qual.fraudIndicator} onChange={(e) => setQual((p) => ({ ...p, fraudIndicator: e.target.checked }))} />
-            <span>Fraud indicator at population level</span>
-          </label>
-          {fraudPresent && (
-            <div className="banner error">
-              Suspected fraud identified. Refer to the engagement fraud risk assessment and
-              communication requirements under ISA 240. No related item may be classified as
-              an anomaly, and the working paper cannot be finalised until the escalation
-              response is completed on the working paper.
-            </div>
-          )}
-        </section>
-
-        {/* Block H */}
-        <section className="ws-card is-active" id="proj-blockH">
-          <div className="ws-card-head">
-            <div>
-              <p className="section-kicker">Block H</p>
-              <h2>Projection method and results</h2>
-              <p className="section-lead">
-                {methodSelectorLocked
-                  ? 'Locked — complete Blocks A to F (including the data quality confirmations) first.'
-                  : 'Method availability is gated by the selection method recorded in Block C (Section 11.6).'}
-              </p>
-            </div>
-          </div>
-
-          {isDetails ? (
-            <>
-              <label>Projection method</label>
-              <select
-                value={method}
-                disabled={methodSelectorLocked}
-                onChange={(e) => setMethod(e.target.value as ProjectionMethodId | '')}
-              >
-                <option value="">— select —</option>
-                <option value="ratio" disabled={availability.ratio === 'blocked'}>
-                  {PROJECTION_METHOD_LABELS.ratio}
-                  {availability.ratio === 'warning' ? ' (with warning)' : ''}
-                </option>
-                <option value="difference" disabled={availability.difference === 'blocked'}>
-                  {PROJECTION_METHOD_LABELS.difference}
-                  {availability.difference === 'blocked' ? ' (blocked for this selection method)' : availability.difference === 'warning' ? ' (with warning)' : ''}
-                </option>
-                <option value="meanPerUnit" disabled={availability.meanPerUnit === 'blocked' || mpuGateFailures.length > 0}>
-                  {PROJECTION_METHOD_LABELS.meanPerUnit}
-                  {!PROJ_CONFIG.meanPerUnitEnabled ? ' (disabled at firm level)' : ''}
-                </option>
-              </select>
-              <p className="hint">
-                The reason for the method selection is written directly on the working paper.
-              </p>
-
-              {method === 'meanPerUnit' && mpuGateFailures.length > 0 && (
-                <div className="banner error">
-                  {mpuGateFailures.map((f) => (
-                    <div key={f}>{f}</div>
-                  ))}
-                </div>
-              )}
-
-              {method !== '' && method !== 'deviationRate' && (
-                <>
-                  <div className="stat-grid">
-                    <div><span>Projection factor</span><strong>{projection.factor?.toFixed(4) ?? (method === 'meanPerUnit' ? 'n/a' : '—')}</strong></div>
-                    <div><span>Projected overstatement (PO)</span><strong>{method === 'meanPerUnit' ? 'net only' : fmtNum(projection.PO)}</strong></div>
-                    <div><span>Projected understatement (PU)</span><strong>{method === 'meanPerUnit' ? 'net only' : fmtNum(projection.PU)}</strong></div>
-                    <div><span>Projected net (PN)</span><strong>{fmtNum(projection.PN)}</strong></div>
-                  </div>
-                  <div className="stat-grid">
-                    <div><span>Best estimate — over</span><strong>{fmtNum(best.over)}</strong></div>
-                    <div><span>Best estimate — under</span><strong>{fmtNum(best.under)}</strong></div>
-                    <div><span>Best estimate — net (ISA 530)</span><strong>{fmtNum(best.net)}</strong></div>
-                    <div><span>Amount to SUM — net (ISA 450)</span><strong>{fmtNum(toSum.net)}</strong></div>
-                  </div>
-                  <p className="hint">
-                    Best estimate = factual + projected + anomalous, all as found (13.2). Amount
-                    to SUM deducts corrected factual and corrected anomalous amounts; the
-                    projected component is never reduced (13.3).
-                  </p>
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              <p className="lead-inline">
-                Tests of controls use Method 4. Under ISA 530 A18 the sample deviation rate is
-                also the projected rate of deviation for the population as a whole — one figure
-                only.
-              </p>
-              <div className="stat-grid">
-                <div><span>Representative deviations</span><strong>{representativeDeviations}</strong></div>
-                <div><span>Sample items</span><strong>{sample.itemCount}</strong></div>
-                <div>
-                  <span>Sample deviation rate (= projected population rate)</span>
-                  <strong>{fmtRate(deviationRate)}</strong>
-                </div>
-                <div><span>Tolerable rate</span><strong>{plan.tolerableDeviationRatePct.toFixed(2)}%</strong></div>
-              </div>
-            </>
-          )}
-
-          {evaluationTriggers.filter((t) => t.severity === 'hard').map((t) => (
-            <div className="banner error" key={t.id}>{t.text}</div>
-          ))}
-
-          {hardTriggers.length > 0 && (
-            <p className="hint">
-              A hard trigger has fired. Select the planned audit response (15.3) on the
-              working paper — at least one is required before it can be marked Final.
-            </p>
-          )}
-        </section>
-
-        {/* Warnings + generate */}
-        <section className="ws-card is-active" id="proj-validation">
-          <div className="ws-card-head">
-            <div>
-              <p className="section-kicker">Validation</p>
-              <h2>Warnings and working paper</h2>
-              <p className="section-lead">
-                Every warning is printed on the working paper, where you record your response
-                to each. A warning cannot be dismissed silently (14.2).
-              </p>
-            </div>
-          </div>
-
-          {hardBlocks.length > 0 && (
-            <div className="banner error">
-              <strong>Hard blocks — the working paper cannot be generated:</strong>
-              {hardBlocks.map((b) => (
-                <div key={b}>• {b}</div>
-              ))}
-            </div>
-          )}
-
-          {warnings.map((w) => (
-            <div className="proj-warning" key={w.id}>
-              <div className="banner warn">{w.text}</div>
-            </div>
-          ))}
-
-          <div className="actions">
             <button
               type="button"
-              className="primary"
-              disabled={!canGenerateWp}
-              onClick={() => setScreen('workingPaper')}
+              className="ghost proj-toggle-btn"
+              onClick={() => setShowExtraBuckets((v) => !v)}
             >
-              Generate working paper →
+              {showExtraBuckets || hasExtraBuckets
+                ? 'Hide 100% / specific items'
+                : '+ Add 100% tested or specifically selected items (optional)'}
             </button>
-          </div>
-          {!canGenerateWp && (
-            <p className="hint">Resolve the hard blocks above to generate the working paper.</p>
-          )}
-        </section>
+
+            {(showExtraBuckets || hasExtraBuckets) && (
+              <div className="form-grid grid-2 proj-optional-panel">
+                <div>
+                  <FieldLabel optional>Value tested 100%</FieldLabel>
+                  <NumberTextInput
+                    integer={false}
+                    value={comp.tested100Value}
+                    onValueChange={(v) => setComp((p) => ({ ...p, tested100Value: v }))}
+                  />
+                </div>
+                <div>
+                  <FieldLabel optional>Count tested 100%</FieldLabel>
+                  <NumberTextInput
+                    value={comp.tested100Count}
+                    onValueChange={(v) => setComp((p) => ({ ...p, tested100Count: v }))}
+                  />
+                </div>
+                <div>
+                  <FieldLabel optional>Value specifically selected</FieldLabel>
+                  <NumberTextInput
+                    integer={false}
+                    value={comp.specificValue}
+                    onValueChange={(v) => setComp((p) => ({ ...p, specificValue: v }))}
+                  />
+                </div>
+                <div>
+                  <FieldLabel optional>Count specifically selected</FieldLabel>
+                  <NumberTextInput
+                    value={comp.specificCount}
+                    onValueChange={(v) => setComp((p) => ({ ...p, specificCount: v }))}
+                  />
+                </div>
+              </div>
+            )}
+
+            {(residualValue < 0 || residualCount < 0) && (
+              <div className="banner error">
+                100% tested + specifically selected items exceed the total population.
+              </div>
+            )}
+
+            <h3 className="proj-subhead">Quick checks (required)</h3>
+            <p className="hint">Answer Yes or No for each. Notes are optional.</p>
+            {qualityItems.map(([key, label]) => (
+              <div className="proj-quality-simple" key={key}>
+                <span className="proj-quality-label">{label}</span>
+                <div className="proj-yesno">
+                  <button
+                    type="button"
+                    className={quality[key].answer === 'yes' ? 'is-on' : ''}
+                    onClick={() =>
+                      setQuality((p) => ({
+                        ...p,
+                        [key]: { ...p[key], answer: 'yes' },
+                      }))
+                    }
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={quality[key].answer === 'no' ? 'is-on' : ''}
+                    onClick={() =>
+                      setQuality((p) => ({
+                        ...p,
+                        [key]: { ...p[key], answer: 'no' },
+                      }))
+                    }
+                  >
+                    No
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            <h3 className="proj-subhead">Reconciliation (optional)</h3>
+            <div className="form-grid grid-2">
+              <div>
+                <FieldLabel optional>Value per listing</FieldLabel>
+                <NumberTextInput
+                  integer={false}
+                  value={recon.valuePerListing}
+                  onValueChange={(v) => setRecon((p) => ({ ...p, valuePerListing: v }))}
+                />
+              </div>
+              <div>
+                <FieldLabel optional>Value per GL / FS</FieldLabel>
+                <NumberTextInput
+                  integer={false}
+                  value={recon.valuePerGL}
+                  onValueChange={(v) => setRecon((p) => ({ ...p, valuePerGL: v }))}
+                />
+              </div>
+            </div>
+            {reconDifference !== 0 && (
+              <>
+                <FieldLabel required>Explain difference ({fmtNum(reconDifference)})</FieldLabel>
+                <textarea
+                  rows={2}
+                  value={recon.explanation}
+                  onChange={(e) => setRecon((p) => ({ ...p, explanation: e.target.value }))}
+                />
+              </>
+            )}
+
+            {stepActions({
+              nextDisabled:
+                !stepDone.population ||
+                (reconDifference !== 0 && !recon.explanation.trim()),
+            })}
+          </section>
+        )}
+
+        {step === 'planning' && (
+          <section className="ws-card is-active">
+            <div className="ws-card-head">
+              <div>
+                <p className="section-kicker">Step 3</p>
+                <h2>Planning</h2>
+                <p className="section-lead">Only the numbers that drive evaluation.</p>
+              </div>
+            </div>
+
+            <div className="form-grid grid-2">
+              <div>
+                <FieldLabel required>Assessed risk</FieldLabel>
+                <select
+                  value={plan.assessedRisk}
+                  onChange={(e) =>
+                    setPlan((p) => ({ ...p, assessedRisk: e.target.value as ProjRisk }))
+                  }
+                >
+                  <option>Low</option>
+                  <option>Moderate</option>
+                  <option>High</option>
+                  <option>Significant</option>
+                </select>
+              </div>
+              <div>
+                <FieldLabel required>Selection method</FieldLabel>
+                <select
+                  value={plan.selectionMethod}
+                  onChange={(e) =>
+                    setPlan((p) => ({
+                      ...p,
+                      selectionMethod: e.target.value as ProjSelectionMethod,
+                    }))
+                  }
+                >
+                  {(Object.keys(SELECTION_METHOD_LABELS) as ProjSelectionMethod[]).map((m) => (
+                    <option key={m} value={m}>
+                      {SELECTION_METHOD_LABELS[m]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {isDetails ? (
+              <div className="form-grid grid-2">
+                <div>
+                  <FieldLabel required>Tolerable misstatement</FieldLabel>
+                  <NumberTextInput
+                    integer={false}
+                    value={plan.tolerableMisstatement}
+                    max={
+                      plan.performanceMateriality > 0
+                        ? plan.performanceMateriality
+                        : undefined
+                    }
+                    onValueChange={(v) => setPlan((p) => ({ ...p, tolerableMisstatement: v }))}
+                  />
+                </div>
+                <div>
+                  <FieldLabel required>Offsetting over/under OK?</FieldLabel>
+                  <select
+                    value={plan.offsettingAppropriate}
+                    onChange={(e) =>
+                      setPlan((p) => ({
+                        ...p,
+                        offsettingAppropriate: e.target.value as YesNo,
+                      }))
+                    }
+                  >
+                    <option value="">— choose —</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <div className="form-grid grid-2">
+                <div>
+                  <FieldLabel required>Tolerable deviation rate (%)</FieldLabel>
+                  <NumberTextInput
+                    integer={false}
+                    max={100}
+                    value={plan.tolerableDeviationRatePct}
+                    onValueChange={(v) =>
+                      setPlan((p) => ({ ...p, tolerableDeviationRatePct: v }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="ghost proj-toggle-btn"
+              onClick={() => setShowMorePlanning((v) => !v)}
+            >
+              {showMorePlanning ? 'Hide optional planning fields' : '+ More planning fields (optional)'}
+            </button>
+
+            {showMorePlanning && (
+              <div className="form-grid grid-2 proj-optional-panel">
+                <div>
+                  <FieldLabel optional>Reliance on controls</FieldLabel>
+                  <select
+                    value={plan.reliance}
+                    onChange={(e) =>
+                      setPlan((p) => ({ ...p, reliance: e.target.value as ProjReliance }))
+                    }
+                  >
+                    <option>None</option>
+                    <option>Partial</option>
+                    <option>Full</option>
+                  </select>
+                </div>
+                <div>
+                  <FieldLabel optional>Sample size basis</FieldLabel>
+                  <select
+                    value={plan.sampleSizeBasis}
+                    onChange={(e) =>
+                      setPlan((p) => ({
+                        ...p,
+                        sampleSizeBasis: e.target.value as ProjSampleSizeBasis,
+                      }))
+                    }
+                  >
+                    <option>Firm sampling table</option>
+                    <option>Firm formula</option>
+                    <option>Professional judgement</option>
+                  </select>
+                </div>
+                {isDetails ? (
+                  <>
+                    <div>
+                      <FieldLabel optional>Performance materiality</FieldLabel>
+                      <NumberTextInput
+                        integer={false}
+                        value={plan.performanceMateriality}
+                        onValueChange={(v) =>
+                          setPlan((p) => ({ ...p, performanceMateriality: v }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel optional>Expected misstatement</FieldLabel>
+                      <NumberTextInput
+                        integer={false}
+                        value={plan.expectedMisstatement}
+                        onValueChange={(v) =>
+                          setPlan((p) => ({ ...p, expectedMisstatement: v }))
+                        }
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <FieldLabel optional>Expected deviation rate (%)</FieldLabel>
+                    <NumberTextInput
+                      integer={false}
+                      max={100}
+                      value={plan.expectedDeviationRatePct}
+                      onValueChange={(v) =>
+                        setPlan((p) => ({ ...p, expectedDeviationRatePct: v }))
+                      }
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isDetails &&
+              plan.performanceMateriality > 0 &&
+              plan.tolerableMisstatement > plan.performanceMateriality && (
+                <div className="banner error">
+                  Tolerable misstatement may not exceed performance materiality.
+                </div>
+              )}
+
+            {stepActions()}
+          </section>
+        )}
+
+        {step === 'sample' && (
+          <section className="ws-card is-active">
+            <div className="ws-card-head">
+              <div>
+                <p className="section-kicker">Step 4</p>
+                <h2>Sample</h2>
+                <p className="section-lead">How many items you tested from the residual population.</p>
+              </div>
+            </div>
+
+            <div className="form-grid grid-2">
+              <div>
+                <FieldLabel required>Sample item count</FieldLabel>
+                <NumberTextInput
+                  value={sample.itemCount}
+                  onValueChange={(v) => setSample((p) => ({ ...p, itemCount: v }))}
+                />
+              </div>
+              {isDetails && (
+                <div>
+                  <FieldLabel required>Sample recorded value</FieldLabel>
+                  <NumberTextInput
+                    integer={false}
+                    value={sample.recordedValue}
+                    onValueChange={(v) => setSample((p) => ({ ...p, recordedValue: v }))}
+                  />
+                </div>
+              )}
+            </div>
+
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={sample.drawnFromResidualConfirmed}
+                onChange={(e) =>
+                  setSample((p) => ({ ...p, drawnFromResidualConfirmed: e.target.checked }))
+                }
+              />
+              <span>
+                Sample drawn only from residual population{' '}
+                <span className="proj-badge proj-badge-req">Required</span>
+              </span>
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={sample.sameBasisConfirmed}
+                onChange={(e) =>
+                  setSample((p) => ({ ...p, sameBasisConfirmed: e.target.checked }))
+                }
+              />
+              <span>
+                Same basis (currency / period / recorded values){' '}
+                <span className="proj-badge proj-badge-req">Required</span>
+              </span>
+            </label>
+
+            {stepActions()}
+          </section>
+        )}
+
+        {step === 'register' && (
+          <section className="ws-card is-active">
+            <div className="ws-card-head">
+              <div>
+                <p className="section-kicker">Step 5</p>
+                <h2>{isDetails ? 'Misstatements found' : 'Deviations found'}</h2>
+                <p className="section-lead">
+                  Optional — skip if none. Add a row only when you found something.
+                </p>
+              </div>
+            </div>
+
+            {isDetails ? (
+              <>
+                <div className="preview-table-wrap preview-table-all">
+                  <table className="proj-register">
+                    <thead>
+                      <tr>
+                        <th>Ref</th>
+                        <th>Bucket</th>
+                        <th>Recorded</th>
+                        <th>Audited</th>
+                        <th>Diff</th>
+                        <th>Anomaly</th>
+                        <th>Corrected</th>
+                        <th>Fraud</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mEntries.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="hint">
+                            No misstatements yet — that is fine.
+                          </td>
+                        </tr>
+                      ) : (
+                        mEntries.map((e) => {
+                          const d = entryDifference(e)
+                          const rows = [
+                            <tr key={e.id}>
+                              <td>
+                                <input
+                                  className="proj-cell"
+                                  placeholder="Ref"
+                                  value={e.itemRef}
+                                  onChange={(ev) =>
+                                    updateMEntry(e.id, { itemRef: ev.target.value })
+                                  }
+                                />
+                              </td>
+                              <td>
+                                <select
+                                  value={e.bucket}
+                                  onChange={(ev) =>
+                                    updateMEntry(e.id, {
+                                      bucket: ev.target.value as RegisterBucket,
+                                    })
+                                  }
+                                >
+                                  {(Object.keys(BUCKET_LABELS) as RegisterBucket[]).map((b) => (
+                                    <option key={b} value={b}>
+                                      {BUCKET_LABELS[b]}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td>
+                                <NumberTextInput
+                                  className="proj-cell"
+                                  integer={false}
+                                  value={e.recordedValue}
+                                  onValueChange={(v) =>
+                                    updateMEntry(e.id, { recordedValue: v })
+                                  }
+                                />
+                              </td>
+                              <td>
+                                <NumberTextInput
+                                  className="proj-cell"
+                                  integer={false}
+                                  value={e.auditedValue}
+                                  onValueChange={(v) =>
+                                    updateMEntry(e.id, { auditedValue: v })
+                                  }
+                                />
+                              </td>
+                              <td className={d >= 0 ? '' : 'proj-under'}>
+                                {fmtNum(d)}
+                              </td>
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={e.anomalyFlagged}
+                                  onChange={(ev) => {
+                                    updateMEntry(e.id, { anomalyFlagged: ev.target.checked })
+                                    setOpenAnomalyId(ev.target.checked ? e.id : null)
+                                  }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={e.correctedByManagement}
+                                  onChange={(ev) =>
+                                    updateMEntry(e.id, {
+                                      correctedByManagement: ev.target.checked,
+                                    })
+                                  }
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={e.fraudIndicator}
+                                  onChange={(ev) =>
+                                    updateMEntry(e.id, { fraudIndicator: ev.target.checked })
+                                  }
+                                />
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="small-btn"
+                                  onClick={() =>
+                                    setMEntries((prev) => prev.filter((x) => x.id !== e.id))
+                                  }
+                                >
+                                  Remove
+                                </button>
+                                {e.anomalyFlagged && (
+                                  <button
+                                    type="button"
+                                    className="small-btn"
+                                    onClick={() =>
+                                      setOpenAnomalyId(openAnomalyId === e.id ? null : e.id)
+                                    }
+                                  >
+                                    {openAnomalyId === e.id ? 'Hide' : 'Justify'}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>,
+                          ]
+                          if (e.anomalyFlagged && openAnomalyId === e.id) {
+                            rows.push(anomalyEditor(e, 'm'))
+                          }
+                          return rows
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="actions">
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => setMEntries((prev) => [...prev, newMisstatementEntry()])}
+                  >
+                    + Add misstatement
+                  </button>
+                </div>
+                {mEntries.length > 0 && (
+                  <div className="stat-grid">
+                    <div>
+                      <span>Gross over</span>
+                      <strong>{fmtNum(agg.GO)}</strong>
+                    </div>
+                    <div>
+                      <span>Gross under</span>
+                      <strong>{fmtNum(agg.GU)}</strong>
+                    </div>
+                    <div>
+                      <span>Representative net</span>
+                      <strong>{fmtNum(agg.RN)}</strong>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="preview-table-wrap preview-table-all">
+                  <table className="proj-register">
+                    <thead>
+                      <tr>
+                        <th>Ref</th>
+                        <th>Bucket</th>
+                        <th>Nature</th>
+                        <th>Anomaly</th>
+                        <th>Fraud</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dEntries.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="hint">
+                            No deviations yet — that is fine.
+                          </td>
+                        </tr>
+                      ) : (
+                        dEntries.map((e) => {
+                          const rows = [
+                            <tr key={e.id}>
+                              <td>
+                                <input
+                                  className="proj-cell"
+                                  value={e.itemRef}
+                                  onChange={(ev) =>
+                                    updateDEntry(e.id, { itemRef: ev.target.value })
+                                  }
+                                />
+                              </td>
+                              <td>
+                                <select
+                                  value={e.bucket}
+                                  onChange={(ev) =>
+                                    updateDEntry(e.id, {
+                                      bucket: ev.target.value as RegisterBucket,
+                                    })
+                                  }
+                                >
+                                  {(Object.keys(BUCKET_LABELS) as RegisterBucket[]).map((b) => (
+                                    <option key={b} value={b}>
+                                      {BUCKET_LABELS[b]}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td>
+                                <input
+                                  className="proj-cell"
+                                  value={e.natureOfDeviation}
+                                  onChange={(ev) =>
+                                    updateDEntry(e.id, {
+                                      natureOfDeviation: ev.target.value,
+                                    })
+                                  }
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={e.anomalyFlagged}
+                                  onChange={(ev) => {
+                                    updateDEntry(e.id, { anomalyFlagged: ev.target.checked })
+                                    setOpenAnomalyId(ev.target.checked ? e.id : null)
+                                  }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={e.fraudIndicator}
+                                  onChange={(ev) =>
+                                    updateDEntry(e.id, { fraudIndicator: ev.target.checked })
+                                  }
+                                />
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="small-btn"
+                                  onClick={() =>
+                                    setDEntries((prev) => prev.filter((x) => x.id !== e.id))
+                                  }
+                                >
+                                  Remove
+                                </button>
+                                {e.anomalyFlagged && (
+                                  <button
+                                    type="button"
+                                    className="small-btn"
+                                    onClick={() =>
+                                      setOpenAnomalyId(openAnomalyId === e.id ? null : e.id)
+                                    }
+                                  >
+                                    {openAnomalyId === e.id ? 'Hide' : 'Justify'}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>,
+                          ]
+                          if (e.anomalyFlagged && openAnomalyId === e.id) {
+                            rows.push(anomalyEditor(e, 'd'))
+                          }
+                          return rows
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="actions">
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => setDEntries((prev) => [...prev, newDeviationEntry()])}
+                  >
+                    + Add deviation
+                  </button>
+                </div>
+              </>
+            )}
+
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={qual.fraudIndicator}
+                onChange={(e) => setQual((p) => ({ ...p, fraudIndicator: e.target.checked }))}
+              />
+              <span>
+                Fraud indicator at population level{' '}
+                <span className="proj-badge proj-badge-opt">Optional</span>
+              </span>
+            </label>
+            {fraudPresent && (
+              <div className="banner error">
+                Suspected fraud identified. Complete the ISA 240 response on the working paper
+                before marking Final.
+              </div>
+            )}
+
+            {stepActions({ nextDisabled: false, nextLabel: 'Continue' })}
+          </section>
+        )}
+
+        {step === 'method' && (
+          <section className="ws-card is-active">
+            <div className="ws-card-head">
+              <div>
+                <p className="section-kicker">Step 6</p>
+                <h2>Projection method</h2>
+                <p className="section-lead">
+                  {methodSelectorLocked
+                    ? 'Complete earlier steps first.'
+                    : 'Pick a method to see projected results.'}
+                </p>
+              </div>
+            </div>
+
+            {isDetails ? (
+              <>
+                <FieldLabel required>Method</FieldLabel>
+                <select
+                  value={method}
+                  disabled={methodSelectorLocked}
+                  onChange={(e) => setMethod(e.target.value as ProjectionMethodId | '')}
+                >
+                  <option value="">— select —</option>
+                  <option value="ratio" disabled={availability.ratio === 'blocked'}>
+                    {PROJECTION_METHOD_LABELS.ratio}
+                    {availability.ratio === 'warning' ? ' (warning)' : ''}
+                  </option>
+                  <option
+                    value="difference"
+                    disabled={availability.difference === 'blocked'}
+                  >
+                    {PROJECTION_METHOD_LABELS.difference}
+                    {availability.difference === 'blocked'
+                      ? ' (blocked)'
+                      : availability.difference === 'warning'
+                        ? ' (warning)'
+                        : ''}
+                  </option>
+                  <option
+                    value="meanPerUnit"
+                    disabled={
+                      availability.meanPerUnit === 'blocked' || mpuGateFailures.length > 0
+                    }
+                  >
+                    {PROJECTION_METHOD_LABELS.meanPerUnit}
+                  </option>
+                </select>
+
+                {method === 'meanPerUnit' && (
+                  <div className="form-grid grid-2" style={{ marginTop: 12 }}>
+                    <div>
+                      <FieldLabel required>Total audited value of sample</FieldLabel>
+                      <NumberTextInput
+                        integer={false}
+                        value={sample.auditedValueTotal}
+                        onValueChange={(v) =>
+                          setSample((p) => ({ ...p, auditedValueTotal: v }))
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {method !== '' && method !== 'deviationRate' && (
+                  <div className="stat-grid" style={{ marginTop: 14 }}>
+                    <div>
+                      <span>Projected net</span>
+                      <strong>{fmtNum(projection.PN)}</strong>
+                    </div>
+                    <div>
+                      <span>Best estimate (net)</span>
+                      <strong>{fmtNum(best.net)}</strong>
+                    </div>
+                    <div>
+                      <span>Amount to SUM (net)</span>
+                      <strong>{fmtNum(toSum.net)}</strong>
+                    </div>
+                    <div>
+                      <span>Tolerable</span>
+                      <strong>{fmtNum(plan.tolerableMisstatement)}</strong>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="stat-grid">
+                <div>
+                  <span>Representative deviations</span>
+                  <strong>{representativeDeviations}</strong>
+                </div>
+                <div>
+                  <span>Sample items</span>
+                  <strong>{sample.itemCount}</strong>
+                </div>
+                <div>
+                  <span>Projected deviation rate</span>
+                  <strong>{fmtRate(deviationRate)}</strong>
+                </div>
+                <div>
+                  <span>Tolerable rate</span>
+                  <strong>{plan.tolerableDeviationRatePct.toFixed(2)}%</strong>
+                </div>
+              </div>
+            )}
+
+            {hardTriggers.map((t) => (
+              <div className="banner error" key={t.id}>
+                {t.text}
+              </div>
+            ))}
+
+            {stepActions({
+              nextDisabled: isDetails ? method === '' : false,
+            })}
+          </section>
+        )}
+
+        {step === 'review' && (
+          <section className="ws-card is-active">
+            <div className="ws-card-head">
+              <div>
+                <p className="section-kicker">Step 7</p>
+                <h2>Generate working paper</h2>
+                <p className="section-lead">
+                  Fix any hard blocks below. Narratives and client details are completed on the
+                  working paper itself.
+                </p>
+              </div>
+            </div>
+
+            {hardBlocks.length > 0 ? (
+              <div className="banner error">
+                <strong>Fix these before generating:</strong>
+                {hardBlocks.map((b) => (
+                  <div key={b}>• {b}</div>
+                ))}
+              </div>
+            ) : (
+              <div className="banner warn" style={{ borderColor: 'transparent' }}>
+                Ready — no hard blocks.
+              </div>
+            )}
+
+            {warnings.length > 0 && (
+              <>
+                <h3 className="proj-subhead">Warnings ({warnings.length})</h3>
+                <p className="hint">Respond to each on the working paper (required before Final).</p>
+                {warnings.map((w) => (
+                  <div className="proj-warning" key={w.id}>
+                    <div className="banner warn">{w.text}</div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            <div className="actions proj-step-actions">
+              <button type="button" className="ghost" onClick={goBack}>
+                ← Back
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={!canGenerateWp}
+                onClick={() => setScreen('workingPaper')}
+              >
+                Generate working paper →
+              </button>
+            </div>
+          </section>
+        )}
       </main>
     </div>
   )

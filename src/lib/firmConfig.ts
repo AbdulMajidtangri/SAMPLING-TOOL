@@ -5,6 +5,10 @@ import {
   type RiskLevel,
 } from './types'
 
+/** Firm identity printed on the working paper masthead and shown in the app top bar. */
+export const FIRM_NAME = 'Peter & Co.'
+export const FIRM_DESCRIPTOR = 'Chartered Accountants'
+
 /** Residual / population count at or below this uses small-population coverage guidance. */
 export const SMALL_POPULATION_CUTOFF = 30
 

@@ -22,11 +22,13 @@
       "dist-electron/**/*"
     ],
     "win": {
+      "icon": "build/icon.png",
       "target": [
         "nsis"
       ]
     },
     "mac": {
+      "icon": "build/icon.png",
       "target": [
         {
           "target": "dmg",
